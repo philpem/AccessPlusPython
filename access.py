@@ -9,6 +9,7 @@ import glob, os, string, socket, sys, threading, time, types
 
 DEFAULT_FILETYPE = 0xffd
 DEFAULT_SUFFIX = os.extsep + "txt"
+#DEFAULT_SUFFIX = ""
 
 # Find the number of centiseconds between 1900 and 1970.
 between_epochs = ((365 * 70) + 17) * 24 * 360000
@@ -365,7 +366,7 @@ class Common:
                 try:
                 
                     return string.atoi(mapping["Hex"], 16), \
-                        self.to_riscos_filename(filename) # [:at]
+                        self.to_riscos_filename(filename)[:at]
                    
                 except ValueError:
                 
@@ -413,7 +414,7 @@ class Common:
         
             # Choose the first available suffix.
             return self.from_riscos_filename(filename) + \
-                os.extsep + suffix[1:]
+                os.extsep + suffixes[0][1:]
         
         else:
         
@@ -448,11 +449,22 @@ class Common:
         
             # Find the number of seconds since the Epoch using the time tuple
             # given.
-            seconds = time.mktime(value)
+            seconds = time.mktime(ttuple)
         
         # Add the number of centiseconds to the number elapsed between 1900
         # and the Epoch (assuming 1970 for this value).
         return long(seconds * 100) + between_epochs
+    
+    def _make_riscos_filetype_date(self, filetype, cs):
+    
+        filetype_word = \
+            0xfff00000 | (filetype << 8) | \
+            ((cs & 0xff00000000) >> 32)
+        
+        # Date word
+        date_word = cs & 0xffffffff
+        
+        return filetype_word, date_word
     
     def make_riscos_filetype_date(self, path):
     
@@ -468,14 +480,17 @@ class Common:
         # Convert this to the RISC OS date format.
         cs = self.to_riscos_time(seconds = seconds)
         
-        filetype_word = \
-            0xfff00000 | (filetype << 8) | \
-            ((cs & 0xff00000000) >> 32)
+        return self._make_riscos_filetype_date(filetype, cs)
+    
+    def take_riscos_filetype_date(self, filetype_word, date_word):
+    
+        # Extract the filetype and date.
+        filetype = (filetype_word & 0xfff00) >> 8
         
-        # Date word
-        date_word = cs & 0xffffffff
+        date_str = hex(filetype_word)[-2:] + hex(date_word)[2:]
+        date = self.from_riscos_time(long(date_str, 16))
         
-        return filetype_word, date_word
+        return filetype, date
     
     def log(self, direction, data, address):
     
@@ -620,7 +635,7 @@ class Common:
         share_name = path_elements[0]
         
         # Read the directory name associated with this share.
-        thread, directory = self.shares[(share_name, self.hostaddr)]
+        thread, directory, date, mode = self.shares[(share_name, self.hostaddr)]
         
         # Construct a path to the object below the shared
         # directory.
@@ -1063,6 +1078,8 @@ class Peer(Common):
             name + chr(protected & 1)
         ]
     
+    #def notify_share_users(self, 
+    
     def broadcast_printer(self, name, description, event,
                           protected = 0, delay = 30):
     
@@ -1290,7 +1307,9 @@ class Peer(Common):
                     if not self.shares.has_key((share_name, host)):
                     
                         # Add the share share_name and host to the shares dictionary.
-                        self.shares[(share_name, host)] = (None, None)
+                        self.shares[(share_name, host)] = (
+                            None, None, None, None
+                            )
                 
                 elif share_type == 0x00010001:
                 
@@ -1345,7 +1364,9 @@ class Peer(Common):
                 if not self.shares.has_key((share_name, host)):
                 
                     # Add the share name and host to the shares dictionary.
-                    self.shares[(share_name, host)] = (None, None)
+                    self.shares[(share_name, host)] = (
+                        None, None, None, None
+                        )
             
             else:
             
@@ -1572,6 +1593,7 @@ class Peer(Common):
             s = self.ports[49171]
             data, address = s.recvfrom(RECV_SIZE)
             
+            self.log("comment", "Listening socket", "")
             self._read_share_socket(s, data, address)
         
         except socket.error:
@@ -1585,6 +1607,7 @@ class Peer(Common):
             s = self.broadcasters[49171]
             data, address = s.recvfrom(RECV_SIZE)
             
+            self.log("comment", "Broadcasting socket", "")
             self._read_share_socket(s, data, address)
         
         except socket.error:
@@ -1608,6 +1631,7 @@ class Peer(Common):
         #print
         
         command = data[0]
+        reply_id = data[1:4]
         
         if len(data) > 4:
         
@@ -1651,14 +1675,34 @@ class Peer(Common):
                         # For unprotected shares, reply with details of the share.
                         
                         # Use the first word given but substitute "R" for "A".
-                        msg = ["R"+data[1:4], 0xffffcd00, 0, 0x800, 0x13, 0x102, 0]
+                        # Set the filetype to be a share (0xfcd), the date as
+                        # the time when the share was added, the length as
+                        # a standard value, the access attributes are
+                        # converted from the mode value given and the object
+                        # type as a standard value.
+                        
+                        thread, directory, date, mode = \
+                            self.shares[(share_name, self.hostaddr)]
+                        
+                        cs = self.to_riscos_time(ttuple = date)
+                        
+                        filetype_word, date_word = \
+                            self._make_riscos_filetype_date(0xfcd, cs)
+                        
+                        access_attr = self.to_riscos_access(mode = mode)
+                        
+                        msg = \
+                        [
+                            "R"+reply_id, filetype_word, date_word, 0x800,
+                            access_attr, 0x102, 0
+                        ]
                     
                     else:
                     
                         # Attempt to create a new object with the share name.
                         msg = \
                         [
-                            "E"+data[1:4], 0xaf,
+                            "E"+reply_id, 0xaf,
                             "'%s' cannot be created - " % path + \
                             "a directory with that name already exists"
                         ]
@@ -1666,7 +1710,8 @@ class Peer(Common):
                 else:
                 
                     # Read the directory name associated with this share.
-                    thread, directory = self.shares[(share_name, self.hostaddr)]
+                    thread, directory, date, mode = \
+                        self.shares[(share_name, self.hostaddr)]
                     
                     # Construct a path to the object below the shared
                     # directory.
@@ -1737,7 +1782,7 @@ class Peer(Common):
                         # Keep this handle for possible later use.
                         self.handles[handle] = (path, length)
                         
-                        msg = [ "R"+data[1:4], filetype, date, length,
+                        msg = [ "R"+reply_id, filetype, date, length,
                                 access_attr, object_type, handle ]
                     
                     elif path != "" and os.path.isfile(path):
@@ -1756,18 +1801,18 @@ class Peer(Common):
                             date = 0xdeaddead
                             access_attr = 0x33
                         
-                        msg = [ "R"+data[1:4], filetype, date, length,
+                        msg = [ "R"+reply_id, filetype, date, length,
                                 access_attr, object_type, handle ]
                     
                     elif code != 0x4:
                     
                         # Reply with an error message.
-                        msg = ["E"+data[1:4], 0x100d6, "Not found"]
+                        msg = ["E"+reply_id, 0x100d6, "Not found"]
                     
                     else:
                     
                         # Reply with an error message.
-                        msg = ["E"+data[1:4], 0x100d6, "Not found"]
+                        msg = ["E"+reply_id, 0x100d6, "Not found"]
                 
                 # Send a reply.
                 self._send_list(msg, _socket, address)
@@ -1776,7 +1821,7 @@ class Peer(Common):
             
                 # Reply with an error message.
                 self._send_list(
-                    ["E"+data[1:4], 0x163ac, "Shared disc not available."],
+                    ["E"+reply_id, 0x163ac, "Shared disc not available."],
                     _socket, address
                     )
         
@@ -1787,6 +1832,7 @@ class Peer(Common):
             try:
             
                 path = self.from_riscos_path(data[12:])
+                print "Delete request:", path
                 
                 # Construct access attributes for the other client.
                 access_attr = self.to_riscos_access(path = path)
@@ -1795,16 +1841,52 @@ class Peer(Common):
                 
                 os.remove(path)
                 
-                msg = [ "R"+data[1:4], 0xdeaddead, 0xdeaddead, 0x00000000,
+                msg = [ "R"+reply_id, 0xdeaddead, 0xdeaddead, 0x00000000,
                         access_attr, object_type ]
             
             except OSError:
             
-                msg = ["E"+data[1:4], 0x100d6, "Not found"]
+                msg = ["E"+reply_id, 0x100d6, "Not found"]
             
             except KeyError:
             
-                msg = ["E"+data[1:4], 0x163ac, "Shared disc not available."]
+                msg = ["E"+reply_id, 0x163ac, "Shared disc not available."]
+            
+            self._send_list(msg, _socket, address)
+        
+        elif command == "A" and code == 0x7:
+        
+            # Set access attributes
+            
+            access_attr = self.str2num(4, data[8:12])
+            
+            try:
+            
+                # Read the path on our machine.
+                path = self.from_riscos_path(data[16:])
+                print "Access request:", path
+                
+                # Convert the RISC OS attributes to a mode value.
+                mode = self.from_riscos_access(access_attr)
+                
+                # Try to change the permissions on the object.
+                os.chmod(path, mode)
+                
+                # Construct the new details for the object.
+                filetype, date, length, access_attr, object_type, \
+                    handle = self.read_path_info(path)
+                
+                # Construct a reply.
+                msg = [ "R"+reply_id, filetype, date, length,
+                        access_attr, object_type ]
+            
+            except OSError:
+            
+                msg = ["E"+reply_id, 0x100d6, "Not found"]
+            
+            except KeyError:
+            
+                msg = ["E"+reply_id, 0x163ac, "Shared disc not available."]
             
             self._send_list(msg, _socket, address)
         
@@ -1821,16 +1903,16 @@ class Peer(Common):
                 filetype, date, length, access_attr, object_type, \
                     handle = self.read_path_info(path)
                 
-                msg = [ "R"+data[1:4], filetype, date, length,
+                msg = [ "R"+reply_id, filetype, date, length,
                         access_attr, object_type, handle ]
                         
             except OSError:
             
-                msg = ["E"+data[1:4], 0x100d6, "Not found"]
+                msg = ["E"+reply_id, 0x100d6, "Not found"]
             
             except KeyError:
             
-                msg = ["E"+data[1:4], 0x163ac, "Shared disc not available."]
+                msg = ["E"+reply_id, 0x163ac, "Shared disc not available."]
             
             self._send_list(msg, _socket, address)
         
@@ -1847,8 +1929,35 @@ class Peer(Common):
                 del self.handles[handle]
             
             # Reply with an short message.
-            msg = ["R"+data[1:4]]
+            msg = ["R"+reply_id]
             
+            self._send_list(msg, _socket, address)
+        
+        elif command == "A" and code == 0xc:
+        
+            # Load named file
+            
+            # The remote client has passed the handle, some word
+            # and the length of the file.
+            length = self.str2num(4, data[16:20])
+            
+            # Reply with an short message.
+            msg = ["R"+reply_id, 0, 0]
+            
+            self._send_list(msg, _socket, address)
+            
+            # Also notify the other client that the share has been updated.
+            
+        elif command == "A" and code == 0xe:
+        
+            # Set length of file.
+            handle = self.str2num(4, data[8:12])
+            length = self.str2num(4, data[12:16])
+            
+            msg = ["D"+reply_id, 0]
+            self._send_list(msg, _socket, address)
+            
+            msg = ["R"+reply_id, 0x1234]
             self._send_list(msg, _socket, address)
         
         elif command == "A" and code == 0xf:
@@ -1858,7 +1967,55 @@ class Peer(Common):
             self.log("received", data, address)
             
             # If we can accept the file then respond with a terse reply.
-            msg = ["R"+data[1:4], 0]
+            msg = ["D"+reply_id, 0]
+            self._send_list(msg, _socket, address)
+            
+            msg = ["R"+reply_id, 0x5678]
+            self._send_list(msg, _socket, address)
+        
+        elif command == "A" and code == 0x10:
+        
+            # Set the file type of a file on our machine.
+            
+            handle = self.str2num(4, data[8:12])
+            filetype_word = self.str2num(4, data[12:16])
+            date_word = self.str2num(4, data[16:20])
+            
+            try:
+            
+                # Read the path on our machine.
+                path, length = self.handles[handle]
+                
+                # Convert it to a RISC OS style filetype and path.
+                filetype, ros_path = self.suffix_to_filetype(path)
+                
+                # Find the filetype and date from the words given.
+                filetype, date = \
+                    self.take_riscos_filetype_date(filetype_word, date_word)
+                
+                # Determine the correct suffix to use for the file.
+                new_path = self.filetype_to_suffix(ros_path, filetype)
+                
+                print new_path
+                
+                # Try to rename the object.
+                os.rename(path, new_path)
+                
+                # Construct the new details for the object.
+                filetype, date, length, access_attr, object_type, \
+                    handle = self.read_path_info(new_path)
+                
+                # Construct a reply.
+                msg = [ "R"+reply_id, filetype, date, length,
+                        access_attr, object_type ]
+            
+            except OSError:
+            
+                msg = ["E"+reply_id, 0x100d6, "Not found"]
+            
+            except KeyError:
+            
+                msg = ["E"+reply_id, 0x100d6, "Not found"]
             
             self._send_list(msg, _socket, address)
         
@@ -1877,7 +2034,8 @@ class Peer(Common):
             share_name = path_elements[0]
             
             # Read the directory name associated with this share.
-            thread, directory = self.shares[(share_name, self.hostaddr)]
+            thread, directory, date, mode = \
+                self.shares[(share_name, self.hostaddr)]
             
             # Construct a path to the object below the shared
             # directory.
@@ -1900,7 +2058,7 @@ class Peer(Common):
             
                 # Reply with an error message.
                 self._send_list(
-                    ["E"+data[1:4], 0x163c5, "Not a Directory"],
+                    ["E"+reply_id, 0x163c5, "Not a Directory"],
                     _socket, address
                     )
                 
@@ -1913,7 +2071,7 @@ class Peer(Common):
                 files = os.listdir(path)
                 
                 # Write the message, starting with the code and ID word.
-                msg = ["S"+data[1:4]]
+                msg = ["S"+reply_id]
                 
                 # Write the catalogue information.
                 
@@ -2028,7 +2186,7 @@ class Peer(Common):
                 
                 msg = msg + \
                 [
-                    "B"+data[1:4], 0xffffcd00, 0x00000000, 0x00000800,
+                    "B"+reply_id, 0xffffcd00, 0x00000000, 0x00000800,
                        0x00000013, share_value, handle,     dir_length,
                      # common value for this^  ^handle of object as with
                      #                  share  info
@@ -2052,7 +2210,7 @@ class Peer(Common):
             
                 # Reply with an error message.
                 self._send_list(
-                    ["E"+data[1:4], 0x163ac, "Shared disc not available."],
+                    ["E"+reply_id, 0x163ac, "Shared disc not available."],
                     _socket, address
                     )
         
@@ -2089,7 +2247,7 @@ class Peer(Common):
                     pass
                 
                 # Write the message header.
-                header = ["S"+data[1:4], len(file_data), 0xc]
+                header = ["S"+reply_id, len(file_data), 0xc]
                 
                 # Encode the header, adding padding if necessary.
                 header = self._encode(header)
@@ -2097,7 +2255,7 @@ class Peer(Common):
                 # Add a 12 byte trailer onto the end of the data
                 # containing the amount of data sent and the new
                 # offset into the file being read.
-                trailer = ["B"+data[1:4], len(file_data), new_pos]
+                trailer = ["B"+reply_id, len(file_data), new_pos]
                 
                 # Encode the trailer, adding padding if necessary.
                 trailer = self._encode(trailer)
@@ -2114,7 +2272,7 @@ class Peer(Common):
                 #
                 #    print line
                 #print
-                msg = self._encode(["E"+data[1:4], 0x100d6, "Not found"])
+                msg = self._encode(["E"+reply_id, 0x100d6, "Not found"])
             
             # Send the message.
             _socket.sendto(msg, address)
@@ -2124,21 +2282,26 @@ class Peer(Common):
             # Rebroadcasted request for information.
             
             # Reply with an error message.
-            msg = ["E"+data[1:4], 0x163ac, "Shared disc not available."]
+            msg = ["E"+reply_id, 0x163ac, "Shared disc not available."]
             
             self._send_list(msg, _socket, address)
         
-        elif data[0] == "R":
+        elif command == "D":
+        
+            # Request for data to be sent.
+            self.share_messages.append(data)
+        
+        elif command == "R":
         
             # Reply from a successful open request.
             self.share_messages.append(data)
         
-        elif data[0] == "S":
+        elif command == "S":
         
             # Successful request for a catalogue.
             self.share_messages.append(data)
         
-        elif data[0] == "E":
+        elif command == "E":
         
             # Error response to a request.
             self.share_messages.append(data)
@@ -2148,7 +2311,7 @@ class Peer(Common):
                 self.str2num(4, data[4:8])
                 )
         
-        elif data[0] == "F":
+        elif command == "F":
         
             # Resource updated
             pass
@@ -2229,7 +2392,8 @@ class Peer(Common):
             pass
         
         # Terminate all threads.
-        for (name, host), (thread, directory) in self.shares.items():
+        for (name, host), (thread, directory, date, mode) in \
+            self.shares.items():
         
             # Only terminate threads for shares on this host.
             if host == self.hostaddr:
@@ -2300,9 +2464,9 @@ class Peer(Common):
             
             print
     
-    def add_share(self, name, directory, protected = 0, delay = 30):
+    def add_share(self, name, directory, mode = 0644, delay = 30):
     
-        """add_share(self, name, directory, protected = 0, delay = 30)
+        """add_share(self, name, directory, mode = 0644, delay = 30)
         
         Add the named share to the shares available to other hosts.
         """
@@ -2311,6 +2475,16 @@ class Peer(Common):
         
             print "Share is already available: %s" % name
             return
+        
+        # Determine the protected flag to broadcast by examining the
+        # other users write bit.
+        if (mode & os.path.stat.S_IWOTH) == 0:
+        
+            protected = 1
+        
+        else:
+        
+            protected = 0
         
         # Create an event to use to inform the share that it must be
         # removed.
@@ -2325,7 +2499,10 @@ class Peer(Common):
             kwargs = {"protected": protected, "delay": delay}
             )
         
-        self.shares[(name, self.hostaddr)] = (thread, directory)
+        # Determine the current time to use for the date of creation.
+        date = time.localtime(time.time())
+        
+        self.shares[(name, self.hostaddr)] = (thread, directory, date, mode)
         
         # Start the thread.
         thread.start()
@@ -2345,7 +2522,7 @@ class Peer(Common):
         # Set the relevant event object's flag.
         self.share_events[name].set()
         
-        thread, directory = self.shares[(name, self.hostaddr)]
+        thread, directory, date, mode = self.shares[(name, self.hostaddr)]
         
         # Wait until the thread terminates.
         while thread.isAlive():
@@ -2410,8 +2587,34 @@ class Peer(Common):
         del self.printers[(name, self.hostaddr)]
         del self.printer_events[name]
     
+    def _scan_messages(self, commands, new_id):
+    
+        for data in self.share_messages:
+        
+            for command in commands:
+            
+                if data[:4] == command+new_id:
+                
+                    # Remove the claimed message from the list.
+                    self.share_messages.remove(data)
+                    
+                    self.data = data
+                    
+                    # Reply indicating that valid data was received.
+                    return 1, data
+                
+            if data[:4] == "E"+new_id:
+            
+                #print 'Error: "%s"' % data[8:]
+                self.share_messages.remove(data)
+                
+                return -1, (self.str2num(4, data[4:8]), data[8:])
+        
+        # Return a negative result.
+        return 0, (0, "The machine containing the shared disc does not respond")
+    
     def _expect_reply(self, _socket, data, host, new_id, commands,
-                     tries = 5, delay = 1):
+                     tries = 5, delay = 2):
     
         replied = 0
         
@@ -2421,26 +2624,13 @@ class Peer(Common):
         while tries > 0:
         
             # See if the response has arrived.
-            for data in self.share_messages:
+            replied, data = self._scan_messages(commands, new_id)
             
-                for command in commands:
-                
-                    if data[:4] == command+new_id:
-                    
-                        # Remove the claimed message from the list.
-                        self.share_messages.remove(data)
-                        
-                        self.data = data
-                        
-                        # Reply indicating that valid data was received.
-                        return 1, data
-                    
-                if data[:4] == "E"+new_id:
-                
-                    #print 'Error: "%s"' % data[8:]
-                    self.share_messages.remove(data)
-                    
-                    return 0, (self.str2num(4, data[4:8]), data[8:])
+            # If a message was found or an error occurred then return
+            # immediately.
+            if replied != 0:
+            
+                return replied, data
             
             t1 = time.time()
             
@@ -2511,13 +2701,19 @@ class Peer(Common):
         length = self.str2num(4, data[12:16])
         access_attr = self.str2num(4, data[16:20])
         object_type = self.str2num(4, data[20:24])
-        handle = self.str2num(4, data[24:28])
         
-        return { "filetype": filetype, "date": date,
+        info = { "filetype": filetype, "date": date,
                  "length": length,
                  "access": access_attr, "type": object_type,
-                 "handle": handle,
                  "isdir": (object_type == 0x2) }
+        
+        if len(data) > 24:
+        
+            handle = self.str2num(4, data[24:28])
+            
+            info["handle"] = handle
+        
+        return info
     
     def open(self, name, host):
     
@@ -2531,7 +2727,7 @@ class Peer(Common):
         # Send the request.
         replied, data = self._send_request(msg, host, ["R"])
         
-        if replied == 0:
+        if replied != 1:
         
             return None
         
@@ -2555,7 +2751,7 @@ class Peer(Common):
         # Send the request.
         replied, data = self._send_request(msg, host, ["S"])
         
-        if replied == 0:
+        if replied != 1:
         
             return
         
@@ -2666,7 +2862,7 @@ class Peer(Common):
             # Send the request.
             replied, data = self._send_request(msg, host, ["S"])
             
-            if replied == 0:
+            if replied != 1:
             
                 print "The machine containing the shared disc does not respond"
                 return
@@ -2698,7 +2894,7 @@ class Peer(Common):
         msg = ["B", 0xb, handle, info["length"], 0]
         replied, data = self._send_request(msg, host, ["S"])
         
-        if replied == 0:
+        if replied != 1:
         
             return None
         
@@ -2721,16 +2917,11 @@ class Peer(Common):
                 sys.stdout.flush()
         
         # Close the resource.
-        msg = ["A", 0xa, handle]
-        replied, data = self._send_request(msg, host, ["R"])
-        
-        if replied == 0:
-        
-            return None
+        self._close(handle, host)
         
         return string.join(file_data, "")
     
-    def _close(self, name, host, handle):
+    def _close(self, handle, host):
     
         #if handle is None:
         #
@@ -2748,13 +2939,9 @@ class Peer(Common):
         msg = ["A", 0xa, handle]
         replied, data = self._send_request(msg, host, ["R"])
         
-        if replied == 0:
+        if replied != 1:
         
             return None
-        
-        else:
-        
-            print 'Successfully closed "%s"' % name
     
     def put(self, path, name, host):
     
@@ -2775,6 +2962,7 @@ class Peer(Common):
         
         except OSError:
         
+            print "Failed to find file: %s" % path
             return
         
         # Convert the filename into a RISC OS filename on the share.
@@ -2798,7 +2986,7 @@ class Peer(Common):
         # Send the request.
         replied, data = self._send_request(msg, host, ["R"])
         
-        if replied == 0:
+        if replied != 1:
         
             return
         
@@ -2808,10 +2996,40 @@ class Peer(Common):
         
         #info = self.open(ros_path, host)
         
-        if info is None:
+        if info is None or not info.has_key("handle"):
         
-            print "Object not found"
+            print "Cannot send file to client."
             return
+        
+        
+        
+        msg = ["A", 0xf, info["handle"], length]
+        
+        # Send the request.
+        replied, data = self._send_request(msg, host, ["R"])
+        
+        if replied != 1:
+        
+            # Tidy up.
+            self._close(info["handle"], host)
+            
+            self.delete(name, host)
+            return
+        
+        # Examine the message queue, looking for "D" messages.
+        reply_id = data[1:4]
+        
+        found = 1
+        while 1:
+        
+            r, d = self._scan_messages(["D"], reply_id)
+            
+            if r == 1:
+                found = 1
+            else:
+                break
+        
+        #return msg
         
         # Send the new length of the file.
         # If we specify the final word (length word) as zero then this
@@ -2822,15 +3040,22 @@ class Peer(Common):
         # Send the request.
         replied, data = self._send_request(msg, host, ["R"])
         
-        if replied == 0:
+        if replied != 1:
         
             # Tidy up.
-            self._close(name, host, handle = info["handle"])
+            self._close(info["handle"], host)
             
             self.delete(name, host)
             return
         
-        return data
+        # A reply containing two words was returned. Presumably, the
+        # second is the length of the file created on the remote machine.
+        length = self.str2num(4, data[8:12])
+        
+        # Tidy up.
+        self._close(info["handle"], host)
+        
+        return info
     
     def delete(self, name, host):
     
@@ -2854,7 +3079,7 @@ class Peer(Common):
         
         replied, data = self._send_request(msg, host, ["R"])
         
-        if replied == 0:
+        if replied != 1:
         
             return
         
@@ -2862,4 +3087,41 @@ class Peer(Common):
         info = self._read_file_info(data)
         
         
+    
+    def setmode(self, name, mode, host):
+    
+        access_attr = self.to_riscos_access(mode)
+        
+        msg = ["A", 0x7, access_attr, 0, name+"\x00"]
+        
+        replied, data = self._send_request(msg, host, ["R"])
+        
+        if replied != 1:
+        
+            return
+        
+        # Read the information returned.
+        info = self._read_file_info(data)
+        
+        return info
+
+    def settype(self, name, filetype, host):
+    
+        # Obtain information on the file (open it).
+        info = self.open(name, host)
+        
+        cs = self.to_riscos_time(ttuple = info["date"])
+        
+        filetype_word, date_word = \
+            self._make_riscos_filetype_date(filetype, cs)
+        
+        msg = ["A", 0x10, info["handle"], filetype_word, date_word]
+        
+        replied, data = self._send_request(msg, host, ["R"])
+        
+        if replied != 1:
+        
+            return
+        
+        self._close(info["handle"], host)
     
