@@ -1,0 +1,13 @@
+Unknown messages received from a client
+
+B<id> 0xd <directory length> 0 0x801
+
+    Suspect that this is to complain about the directory returned to the
+    client in response to a previous "B" request. The directory length may
+    be that returned at the start of the "S" response we previously sent.
+
+A<id> 0xa <directory length>
+
+    Suspect that this is to complain about the directory returned to the
+    client in response to a previous "B" request. The directory length may
+    be that returned at the end of the "S" response we previously sent.
