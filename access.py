@@ -46,7 +46,7 @@ DEFAULT_PRINTER_DELAY = 30.0
 TIDY_DELAY = 60.0
 
 # Find the number of centiseconds between 1900 and 1970.
-between_epochs = ((365 * 70) + 17) * 24 * 360000
+between_epochs = ((365 * 70) + 17) * 24 * 360000L
 
 # Buffer size configuration
 
@@ -331,7 +331,7 @@ class Common:
             )
         
         # Date word
-        date_word = int(cs & 0xffffffff)
+        date_word = cs & 0xffffffffL
         
         return filetype_word, date_word
     
