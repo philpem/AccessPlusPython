@@ -2,8 +2,9 @@ AccessPlusPython (0.29)
 
 Copyright (c) 2003-4 David Boddie
 
-This software is licensed under the MIT License. See the access.py file
-or http://www.opensource.org/licenses/mit-license.php for more information.
+This software is licensed under the MIT License. See the access.py file,
+the LICENSE.txt file or http://www.opensource.org/licenses/mit-license.php
+for more information.
 
 
 Introduction
