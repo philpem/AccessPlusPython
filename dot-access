@@ -1,3 +1,5 @@
+# Uncomment and customise the lines you want.
+
 # Share      Path                   Mode    Delay (s)   Presentation    Filetype
 
 #  user      /home/user/share       0644    30.0        truncate        0xfff
