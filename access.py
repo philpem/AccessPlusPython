@@ -26,6 +26,27 @@ SEND_SIZE = 16384
 SEND_PPUT_SIZE = 16384
 SEND_GET_SIZE = 4096
 
+# Local directory permissions for newly created directories
+DIR_EXEC = os.path.stat.S_IFDIR | \
+    os.path.stat.S_IXUSR | \
+    os.path.stat.S_IXGRP | \
+    os.path.stat.S_IXOTH
+
+# Local file permissions for newly created files
+FILE_ATTR = os.path.stat.S_IFREG
+
+# Protected share read and write masks
+PROTECTED_READ  = 0044
+PROTECTED_WRITE = 0022
+
+# Unprotected share read and write masks
+UNPROTECTED_READ  = 0444
+UNPROTECTED_WRITE = 0222
+
+# Standard sizes of objects on a RISC OS style filing system
+
+ROS_DIR_LENGTH = 0x800
+
 
 DEBUG = 1
 
@@ -659,7 +680,7 @@ class Files:
         return self.handles.values()
 
 
-class Messages:
+class Messages(Common):
 
     def __init__(self):
     
@@ -922,12 +943,31 @@ class File:
     
 class Directory:
 
-    def __init__(path):
+    def __init__(self, path, share):
     
         if not os.path.exists(path):
         
-            os.mkdir(path)
-
+            try:
+            
+                os.mkdir(path)
+                os.chmod(path, share.mode | DIR_EXEC)
+                self.log(
+                    "comment",
+                    "Created %s with permissions: %s" % \
+                        (path, oct(share.mode | DIR_EXEC)),
+                    ""
+                    )
+            
+            except OSError:
+            
+                pass
+        
+        self.path = path
+        self.share = share
+    
+    def length(self):
+    
+        return ROS_DIR_LENGTH
 
 
 class Unused(Common):
@@ -1230,24 +1270,42 @@ class Translate:
         
         return built
     
-    def to_riscos_access(self, path = None):
+    def read_mode(self, path):
     
-        """word = to_riscos_access(self, mode = 0777, path = None)
+        """mode = read_mode(self, path)
+        
+        Return the access mode for the path given or None if the path is
+        invalid.
+        """
+        
+        try:
+        
+            return os.stat(path)[os.path.stat.ST_MODE]
+        
+        except OSError:
+        
+            return None
+    
+    def to_riscos_access(self, mode = None, path = None):
+    
+        """word = to_riscos_access(self, mode = None, path = None)
         
         Return a word representing the RISC OS access flags roughly
         equivalent to the read, write and execute flags for a local file,
         given as an octal number in integer form.
         
         If a path is given then its mode is determined and used instead.
+        
+        If no valid mode value can be determined then 0444 is used.
         """
         
         if path is not None:
         
-            mode = os.stat(path)[os.path.stat.ST_MODE]
+            mode = self.read_mode(path)
         
-        else:
+        if mode is None:
         
-            mode = self.mode
+            mode = 0444
         
         # Owner permissions
         owner_read = (mode & os.path.stat.S_IRUSR) != 0
@@ -1346,7 +1404,7 @@ class Translate:
         
             return 0
     
-    def from_riscos_path(self, ros_path):
+    def from_riscos_path(self, ros_path, find_obj = 1):
     
         # Construct a path to the object below the shared directory.
         path = self.from_riscos_filename(ros_path)
@@ -1354,8 +1412,10 @@ class Translate:
         # Append this path to the shared directory's path.
         path = os.path.join(self.directory, path)
         
-        # Look for a suitable file.
-        path = self.find_relevant_file(path)
+        if find_obj == 1:
+        
+            # Look for a suitable file.
+            path = self.find_relevant_file(path)
         
         return path
     
@@ -1368,7 +1428,7 @@ class Translate:
         # Find the length of the file.
         if os.path.isdir(path):
         
-            length = 0x800
+            length = ROS_DIR_LENGTH
         
         else:
         
@@ -1408,11 +1468,15 @@ class Share(Ports, Translate):
         # other users write bit.
         if (mode & os.path.stat.S_IWOTH) == 0:
         
-            protected = 1
+            self.protected = 1
+            self.read_mask = PROTECTED_READ
+            self.write_mask = PROTECTED_WRITE
         
         else:
         
-            protected = 0
+            self.protected = 0
+            self.read_mask = UNPROTECTED_READ
+            self.write_mask = UNPROTECTED_WRITE
         
         # Create an event to use to inform the share that it must be
         # removed.
@@ -1424,7 +1488,7 @@ class Share(Ports, Translate):
         thread = threading.Thread(
             group = None, target = self.broadcast_share,
             name = 'Share "%s"' % name, args = (name, event),
-            kwargs = {"protected": protected, "delay": delay}
+            kwargs = {"protected": self.protected, "delay": delay}
             )
         
         # Determine the current time to use for the date of creation.
@@ -1438,6 +1502,9 @@ class Share(Ports, Translate):
         self.mode = mode
         self.present = present
         self.filetype = filetype
+        
+        # Convert the share's mode mask to a file attribute mask.
+        self.access_attr = self.to_riscos_access(mode = mode)
         
         # Start the thread.
         thread.start()
@@ -1518,6 +1585,51 @@ class Share(Ports, Translate):
     
     #def notify_share_users(self, 
     
+    def descend_path(self, path, names = None, check_mode = PROTECTED_READ):
+    
+        """path = descend_path(self, path, names = None)
+        
+        Descend the path as far as the share's access attributes will allow.
+        If this is not far enough then return None.
+        
+        Similarly, if the path takes us outside the share then return None.
+        """
+        
+        if names is None: names = []
+        
+        if path == self.directory:
+        
+            return self.directory, names
+        
+        # Split the path into two parts.
+        path1, path2 = os.path.split(path)
+        
+        # Recurse with a path and a list of names to descend into.
+        path, names = self.descend_path(path1, [path2] + names)
+        
+        # Try to descend the directory structure.
+        
+        # If there are no names to add to the path then just return the path
+        # and an empty list.
+        if names == []:
+        
+            return path, []
+        
+        # Join the first name to the path.
+        next_path = os.path.join(path, names[0])
+        
+        mode = self.read_mode(next_path)
+        
+        if mode is None or (mode & check_mode & self.mode) == 0:
+        
+            # We cannot read this object. Return the unextended path and the
+            # names which were not added.
+            return path, names
+        
+        # We can read this object so return the combined path and a shortened
+        # list of names.
+        return next_path, names[1:]
+    
     def open_path(self, ros_path):
     
         self.log("comment", "Original path: %s" % ros_path, "")
@@ -1533,17 +1645,26 @@ class Share(Ports, Translate):
             filetype_word, date_word = \
                 self._make_riscos_filetype_date(0xfcd, cs)
             
-            access_attr = self.to_riscos_access()
+            # Mask the access attributes of this file with the share's access
+            # mask.
+            access_attr = self.access_attr
             
             # Set the filetype to be a share (0xfcd), the date as
             # the time when the share was added, the length as
             # a standard value, the access attributes are
             # converted from the mode value given and the object
             # type as a standard value.
-            return [ filetype_word, date_word, 0x800, access_attr,
+            return [ filetype_word, date_word, ROS_DIR_LENGTH, access_attr,
                      0x102, 0], path
 
         self.log("comment", "Open path: %s" % path, "")
+        
+        # Find whether the directory structure can be legitimately descended.
+        if path is not None:
+        
+            path, rest = self.descend_path(path, check_mode = self.read_mask)
+            
+            if rest != []: path = None
         
         if path is not None and os.path.isdir(path):
         
@@ -1555,7 +1676,7 @@ class Share(Ports, Translate):
             # Keep this handle for possible later use.
             if not self.file_handler.has_key(handle):
             
-                self.file_handler[handle] = Directory(path)
+                self.file_handler[handle] = Directory(path, self)
             
             else:
             
@@ -1595,7 +1716,7 @@ class Share(Ports, Translate):
             # Reply with an error message.
             return None, path
     
-    def create_path(self, ros_path):
+    def create_file(self, ros_path):
     
         # Try to open the corresponding file.
         info, path = self.open_path(ros_path)
@@ -1608,12 +1729,28 @@ class Share(Ports, Translate):
         if info is None:
         
             # No file exists at this path.
+            
+            # Determine whether the parent directory of the file can be written
+            # to.
+            
+            # Construct a path to the object below the shared directory.
+            path = self.from_riscos_path(ros_path, find_obj = 0)
+            
+            parent_path, file = os.path.split(path)
+            
+            write_path, rest = self.descend_path(
+                parent_path, check_mode = self.write_mask
+                )
+            
+            # Return an error value if it can't.
+            if rest != []: return None, write_path
+            
             try:
             
                 # Create an object on the local filesystem.
                 path = path + DEFAULT_SUFFIX
                 open(path, "wb").write("")
-                os.chmod(path, self.mode)
+                os.chmod(path, self.mode | FILE_ATTR)
             
             except IOError:
             
@@ -1627,11 +1764,18 @@ class Share(Ports, Translate):
         else:
         
             # A file already exists at this path.
+            
+            # Find whether the object can be legitimately overwritten.
+            path, rest = self.descend_path(path, check_mode = self.write_mask)
+            
+            # Return an error value if it can't.
+            if rest != []: return None, path
+            
             try:
             
                 # Create an object on the local filesystem.
                 open(path, "wb").write("")
-                os.chmod(path, self.mode)
+                os.chmod(path, self.mode | FILE_ATTR)
             
             except IOError:
             
@@ -1656,7 +1800,7 @@ class Share(Ports, Translate):
             # Keep this handle for possible later use.
             if not self.file_handler.has_key(handle):
             
-                self.file_handler[handle] = Directory(path)
+                self.file_handler[handle] = Directory(path, self)
             
             return [ filetype, date, length, access_attr, object_type,
                      handle ], path
@@ -1700,17 +1844,30 @@ class Share(Ports, Translate):
             # The share itself is being referenced.
             return None, path
         
+        if path is None:
+        
+            return None, path
+        
         self.log("comment", "Delete request: %s" % path, "")
         
-        # Construct access attributes for the other client.
-        access_attr = self.to_riscos_access(path = path)
-        
-        object_type = self.to_riscos_objtype(path)
+        filetype, date, length, access_attr, object_type, \
+            handle = self.read_path_info(path)
         
         try:
         
-            os.remove(path)
-            return [ 0xdeaddead, 0xdeaddead, 0x00000000, access_attr,
+            if os.path.isfile(path):
+            
+                os.remove(path)
+            
+            elif os.path.isdir(path):
+            
+                os.rmdir(path)
+            
+            else:
+            
+                return None, path
+            
+            return [ filetype, date, length, access_attr,
                      object_type ], path
         
         except OSError:
@@ -1727,13 +1884,33 @@ class Share(Ports, Translate):
             # The share itself is being referenced.
             return None, path
         
+        if path is None:
+        
+            return None, path
+        
         # Convert the RISC OS attributes to a mode value.
         mode = self.from_riscos_access(access_attr)
         
         # Try to change the permissions on the object.
         try:
         
-            os.chmod(path, mode)
+            if os.path.isfile(path):
+            
+                # Ensure that the remote client doesn't mess up the file
+                # access attributes by making the file unreadable.
+                mode = ( (mode & 0x1c7) | ((mode & 0x1c0) >> 3) )
+                
+                mode = (mode & self.mode) | FILE_ATTR
+                
+                os.chmod(path, mode)
+            
+            elif os.path.isdir(path):
+            
+                # Ensure that the remote client doesn't mess up the
+                # directory access attributes.
+                mode = self.mode | DIR_EXEC
+                
+                os.chmod(path, mode)
             
             # Construct the new details for the object.
             filetype, date, length, access_attr, object_type, \
@@ -1757,7 +1934,7 @@ class Share(Ports, Translate):
         
         return info, path
     
-    def set_filetype(self, fh):
+    def set_filetype(self, fh, filetype_word, date_word):
     
         # Convert the file's path to a RISC OS style filetype and path.
         filetype, ros_path = self.suffix_to_filetype(fh.path)
@@ -1766,30 +1943,32 @@ class Share(Ports, Translate):
         filetype, date = \
             self.take_riscos_filetype_date(filetype_word, date_word)
         
-        # Determine the correct suffix to use for the file.
-        new_path = self.filetype_to_suffix(ros_path, filetype)
+        if os.path.isfile(fh.path):
         
-        self.log("comment", "Renaming %s to %s" % (fh.path, new_path), "")
-        
-        if fh.path != new_path:
-        
-            try:
+            # Determine the correct suffix to use for the file.
+            new_path = self.filetype_to_suffix(ros_path, filetype)
             
-                # Try to rename the object.
-                os.rename(fh.path, new_path)
+            self.log("comment", "Renaming %s to %s" % (fh.path, new_path), "")
             
-            except OSError:
+            if fh.path != new_path:
             
-                return None
+                try:
+                
+                    # Try to rename the object.
+                    os.rename(fh.path, new_path)
+                
+                except OSError:
+                
+                    return None
+            
+            fh.path = new_path
         
         # Construct the new details for the object.
         filetype, date, length, access_attr, object_type, \
-            handle = self.read_path_info(new_path)
+            handle = self.read_path_info(fh.path)
         
         # Keep the length from the original file.
         length = fh.length()
-        
-        fh.path = new_path
         
         return [filetype, date, length, access_attr, object_type, handle]
     
@@ -1803,10 +1982,13 @@ class Share(Ports, Translate):
             # The path given did not refer to a directory.
             return None, "Not a directory", path
         
+        if path is None:
+        
+            return None, "Not found", path
+        
         try:
         
             # For unprotected shares, return a catalogue to the client.
-            
             files = os.listdir(path)
         
         except OSError:
@@ -1873,7 +2055,7 @@ class Share(Ports, Translate):
                 # Length word (0x800 for directory)
                 if os.path.isdir(this_path):
                 
-                    file_info.append(0x800)
+                    file_info.append(ROS_DIR_LENGTH)
                 
                 else:
                 
@@ -1881,8 +2063,10 @@ class Share(Ports, Translate):
                 
                 length = length + 4
                 
-                # Access attributes
-                file_info.append(self.to_riscos_access(path = this_path))
+                # Access attributes (masked by the share's access mask)
+                file_info.append(
+                    self.to_riscos_access(path = this_path) & self.access_attr
+                    )
                 
                 length = length + 4
                 
@@ -1988,6 +2172,75 @@ class Share(Ports, Translate):
         
         return info, trailer, new_pos
     
+    def create_directory(self, ros_path):
+    
+        # Construct a path to the object below the shared directory.
+        path = self.from_riscos_path(ros_path, find_obj = 0)
+        
+        if ros_path == "":
+        
+            # The share itself is being referenced.
+            return None, path
+        
+        # Return if the path could not be translated.
+        if path is None:
+        
+            return None, path
+        
+        # Determine whether the parent directory of the file can be written
+        # to.
+        parent_path, file = os.path.split(path)
+        
+        write_path, rest = self.descend_path(
+            parent_path, check_mode = self.write_mask
+            )
+        
+        print write_path, rest
+        
+        # Return an error value if it can't.
+        if rest != []: return None, write_path
+        
+        try:
+        
+            # Create a drectory on the local filesystem.
+            os.mkdir(path)
+        
+        except OSError:
+        
+            return None, path
+        
+        try:
+        
+            # Make the directory executable by everyone but retain the
+            # other mode attributes for this share.
+            os.chmod(path, self.mode | DIR_EXEC)
+        
+        except OSError:
+        
+            os.rmdir(path)
+            return None, path
+        
+        self.log("comment", "Actual path: %s" % path, "")
+        self.log(
+            "comment",
+            "%s has permissions: %s" % \
+                (path, oct(os.stat(path)[os.path.stat.ST_MODE])),
+            ""
+            )
+        
+        # Try to find the details of the directory.
+        
+        filetype, date, length, access_attr, object_type, \
+            handle = self.read_path_info(path)
+        
+        # Keep this handle for possible later use.
+        if not self.file_handler.has_key(handle):
+        
+            self.file_handler[handle] = Directory(path, self)
+        
+        return [ filetype, date, length, access_attr, object_type,
+                 handle ], path
+    
     
 
 
@@ -2031,12 +2284,18 @@ class RemoteShare(Ports, Translate):
         
         return info
     
-    def open(self, name):
+    def open(self, ros_path):
     
         """open(self, name)
         
         Open a resource of a given name in the share.
         """
+        
+        name = self.name
+        
+        if ros_path != "":
+        
+            name = name + "." + ros_path
         
         msg = ["A", 1, 0, name+"\x00"]
         
@@ -2054,12 +2313,18 @@ class RemoteShare(Ports, Translate):
         # Return the information on the item.
         return self._read_file_info(data)
     
-    def catalogue(self, name):
+    def catalogue(self, ros_path):
     
-        """lines = catalogue(self, name)
+        """lines = catalogue(self, ros_path)
         
         Return a catalogue of the files in the named share.
         """
+        
+        name = self.name
+        
+        if ros_path != "":
+        
+            name = name + "." + ros_path
         
         msg = ["B", 3, 0xffffffff, 0, name+"\x00"]
         
@@ -2355,7 +2620,7 @@ class RemoteShare(Ports, Translate):
         
             return None
     
-    def put(self, path, name):
+    def put(self, path, ros_path):
     
         # Use the non-broadcast socket.
         if not self.ports.has_key(49171):
@@ -2394,14 +2659,34 @@ class RemoteShare(Ports, Translate):
         
         self.log("comment", "Remote file: %s" % ros_file, "")
         
-        # Join the path with the share name to obtain a share-relative
-        # path.
-        ros_path = name + "." + ros_file
+        # Determine whether the share path supplied refers to a file
+        # or a directory.
+        
+        info = self.catalogue(ros_path)
+        
+        if info is not None:
+        
+            # A directory
+            
+            # Prefix the path in the share with the share name and append
+            # the filename to obtain a full share path to the object.
+            ros_path = ros_path + "." + ros_file
+            
+            full_path = self.name + "." + ros_path
+        
+        else:
+        
+            # A file or no existing object
+            
+            # Use the share path given and ignore the filename derived
+            # from the local path.
+            
+            full_path = self.name + "." + ros_path
         
         self.log("comment", "Remote path: %s" % ros_path, "")
         
-        # Create a file on the remote server.
-        msg = ["A", 0x4, 0, ros_path+"\x00"]
+        # Create a file on the remote server using the full path.
+        msg = ["A", 0x4, 0, full_path+"\x00"]
         
         # Send the request.
         replied, data = self._send_request(msg, self.host, ["R"])
@@ -2430,6 +2715,8 @@ class RemoteShare(Ports, Translate):
             # Tidy up.
             self._close(info["handle"])
             
+            # Use the share path rather than the full share path as the
+            # delete method will prepend the share name.
             self.delete(ros_path)
             return
         
@@ -2479,6 +2766,8 @@ class RemoteShare(Ports, Translate):
                     # Tidy up.
                     self._close(info["handle"])
                     
+                    # Use the share path rather than the full share path as the
+                    # delete method will prepend the share name.
                     self.delete(ros_path)
                     
                     f.close()
@@ -2536,6 +2825,8 @@ class RemoteShare(Ports, Translate):
             # Tidy up.
             self._close(info["handle"])
             
+            # Use the share path rather than the full share path as the
+            # delete method will prepend the share name.
             self.delete(ros_path)
             
             print "Uploading was terminated."
@@ -2552,13 +2843,15 @@ class RemoteShare(Ports, Translate):
             # Tidy up.
             self._close(info["handle"])
             
+            # Use the share path rather than the full share path as the
+            # delete method will prepend the share name.
             self.delete(ros_path)
             return
         
         # Tidy up.
         self._close(info["handle"])
     
-    def pput(self, path, name):
+    def pput(self, path, ros_path):
     
         # Use the non-broadcast socket.
         if not self.ports.has_key(49171):
@@ -2597,14 +2890,35 @@ class RemoteShare(Ports, Translate):
         
         self.log("comment", "Remote file: %s" % ros_file, "")
         
-        # Join the path with the share name to obtain a share-relative
-        # path.
-        ros_path = name + "." + ros_file
+        # Determine whether the share path supplied refers to a file
+        # or a directory.
+        
+        info = self.catalogue(ros_path)
+        
+        if info is not None:
+        
+            # A directory
+            
+            # Prefix the path in the share with the share name and append
+            # the filename to obtain a full share path to the object.
+            ros_path = ros_path + "." + ros_file
+            
+            full_path = self.name + "." + ros_path
+        
+        else:
+        
+            # A file or no existing object
+            
+            # Use the share path given and ignore the filename derived
+            # from the local path.
+            
+            full_path = self.name + "." + ros_path
+        
         
         self.log("comment", "Remote path: %s" % ros_path, "")
         
-        # Create a file on the remote server.
-        msg = ["A", 0x4, 0, ros_path+"\x00"]
+        # Create a file on the remote server using the full share path.
+        msg = ["A", 0x4, 0, full_path+"\x00"]
         
         # Send the request.
         replied, data = self._send_request(msg, self.host, ["R"])
@@ -2646,6 +2960,8 @@ class RemoteShare(Ports, Translate):
                     # Tidy up.
                     self._close(info["handle"])
                     
+                    # Use the share path rather than the full share path as the
+                    # delete method will prepend the share name.
                     self.delete(ros_path)
                     return
                 
@@ -2714,6 +3030,8 @@ class RemoteShare(Ports, Translate):
                         # Tidy up.
                         self._close(info["handle"])
                         
+                        # Use the share path rather than the full share path as the
+                        # delete method will prepend the share name.
                         self.delete(ros_path)
                         
                         f.close()
@@ -2760,6 +3078,8 @@ class RemoteShare(Ports, Translate):
             # Tidy up.
             self._close(info["handle"])
             
+            # Use the share path rather than the full share path as the
+            # delete method will prepend the share name.
             self.delete(ros_path)
             
             print "Uploading was terminated."
@@ -2776,47 +3096,26 @@ class RemoteShare(Ports, Translate):
             # Tidy up.
             self._close(info["handle"])
             
+            # Use the share path rather than the full share path as the
+            # delete method will prepend the share name.
             self.delete(ros_path)
             return
-        
-#        # Set the file's length.
-#        msg = ["A", 0xf, info["handle"], length]
-#        
-#        # Send the request.
-#        replied, data = self._send_request(msg, host, ["R"])
-#        
-#        if replied != 1:
-#        
-#            # Tidy up.
-#            self._close(info["handle"], host)
-#            
-#            self.delete(ros_path, host)
-#            return
-#        
-#        # Examine the message queue, looking for "D" messages.
-#        reply_id = data[1:4]
-#        
-#        found = 1
-#        while 1:
-#        
-#            r, d = self.messages._scan_messages(["D"], reply_id)
-#            
-#            if r == 1:
-#                found = 1
-#            else:
-#                break
-        
-        #return msg
         
         # Tidy up.
         self._close(info["handle"])
     
-    def delete(self, name):
+    def delete(self, ros_path):
     
-        """delete(self, name)
+        """delete(self, ros_path)
         
         Delete the named file on the specified host.
         """
+        
+        name = self.name
+        
+        if ros_path != "":
+        
+            name = name + "." + ros_path
         
         msg = ["A", 0x6, 0, name + "\x00"]
         
@@ -2824,7 +3123,7 @@ class RemoteShare(Ports, Translate):
         
         if replied == 1:
         
-            sys.stdout.write("Deleted %s on %s" % (name, self.host))
+            sys.stdout.write('Deleted "%s" on "%s"' % (name, self.host))
             sys.stdout.flush()
     
     def rename(self, name1, name2):
@@ -2842,9 +3141,15 @@ class RemoteShare(Ports, Translate):
         
         
     
-    def setmode(self, name, mode):
+    def setmode(self, ros_path, mode):
     
-        access_attr = self.to_riscos_access(mode)
+        name = self.name
+        
+        if ros_path != "":
+        
+            name = name + "." + ros_path
+        
+        access_attr = self.to_riscos_access(mode = mode)
         
         msg = ["A", 0x7, access_attr, 0, name+"\x00"]
         
@@ -2859,8 +3164,14 @@ class RemoteShare(Ports, Translate):
         
         return info
     
-    def settype(self, name, filetype):
+    def settype(self, ros_path, filetype):
     
+        name = self.name
+        
+        if ros_path != "":
+        
+            name = name + "." + ros_path
+        
         # Obtain information on the file (open it).
         info = self.open(name)
         
@@ -2879,6 +3190,35 @@ class RemoteShare(Ports, Translate):
         
         self._close(info["handle"])
     
+    def create_directory(self, ros_path):
+    
+        """create_directory(self, ros_path)
+        
+        Create a directory at a location within the share.
+        """
+        
+        name = self.name
+        
+        if ros_path != "":
+        
+            name = name + "." + ros_path
+        
+        msg = ["A", 0x5, 0, name + "\x00"]
+        
+        replied, data = self._send_request(msg, self.host, ["R"])
+        
+        if replied != 1:
+        
+            return None
+        
+        sys.stdout.write('Created "%s" on share "%s"' % (name, self.host))
+        sys.stdout.flush()
+        
+        # Read the information returned.
+        info = self._read_file_info(data)
+        
+        return info
+
 
 
 class Peer(Ports):
@@ -2978,11 +3318,16 @@ class Peer(Ports):
     def create_shares(self):
     
         # Compile a list of paths to check for the access.cfg file.
+        
+        # Start with the current directory.
         paths = [""]
         
         # Look for a file in the path used to invoke this program.
         path, file = os.path.split(sys.argv[0])
         paths.append(path)
+        
+        # Add the user's home directory.
+        paths.append(os.getenv("HOME"))
         
         f = None
         
@@ -2990,7 +3335,7 @@ class Peer(Ports):
         
             try:
             
-                f = open(os.path.join(path, "access.cfg"), "r")
+                f = open(os.path.join(path, ".access"), "r")
                 break
             
             except IOError:
@@ -3072,7 +3417,14 @@ class Peer(Ports):
                 # Try to create this share.
                 name, path, mode, delay, present, filetype = values[0:6]
                 
-                self.add_share(name, path, mode, delay, present, filetype)
+                try:
+                
+                    self.add_share(name, path, mode, delay, present, filetype)
+                
+                except ShareError:
+                
+                    sys.stderr.write("Could not add share: %s\n" % name)
+                    sys.stderr.flush()
                 
             elif len(values) > 0:
             
@@ -3159,6 +3511,16 @@ class Peer(Ports):
             while (time.time() - t0) < delay:
             
                 if event.isSet(): return
+        
+        # Create a string to send.
+        data = \
+        [
+            0x00050003, 0x00010000,
+            (len(self.identity) << 16) | len(Hostname),
+            Hostname + self.identity
+        ]
+        
+        self._send_list(data, s, (Broadcast_addr, 32770))
     
     def broadcast_printer(self, name, description, event,
                           protected = 0, delay = 30):
@@ -3628,7 +3990,9 @@ class Peer(Ports):
                     
                         # Add the share share_name and host to the shares
                         # dictionary.
-                        share = RemoteShare(host)
+                        share = RemoteShare(
+                            share_name, host, messages = self.share_messages
+                            )
                         
                         self.shares[(share_name, host)] = share
                 
@@ -3685,7 +4049,9 @@ class Peer(Ports):
                 if not self.shares.has_key((share_name, host)):
                 
                     # Add the share name and host to the shares dictionary.
-                    share = RemoteShare(host)
+                    share = RemoteShare(
+                        share_name, host, messages = self.share_messages
+                        )
                     
                     self.shares[(share_name, host)] = share
             
@@ -4073,7 +4439,50 @@ class Peer(Ports):
                 try:
                 
                     share = self.shares[(share_name, Hostaddr)]
-                    info, path = share.create_path(ros_path)
+                    info, path = share.create_file(ros_path)
+                
+                except KeyError:
+                
+                    info = None
+                
+                if info is not None:
+                
+                    msg = ["R"+reply_id] + info
+                
+                elif ros_path == "":
+                
+                    msg = \
+                    [
+                        "E"+reply_id, 0xaf,
+                        "'%s' cannot be created - " % path + \
+                        "a directory with that name already exists"
+                    ]
+                
+                else:
+                
+                    # Reply with an error message.
+                    msg = ["E"+reply_id, 0x100d6, "Not found"]
+                
+                # Send a reply.
+                self._send_list(msg, _socket, address)
+        
+            elif code == 0x5:
+            
+                # Create and open a share or directory.
+                
+                # Find the share and RISC OS path within it.
+                share_name, ros_path = self.read_share_path(data[12:])
+                
+                self.log(
+                    "comment", 'Request to create "%s" in share "%s"' % (
+                        ros_path, share_name
+                        ), ""
+                    )
+                
+                try:
+                
+                    share = self.shares[(share_name, Hostaddr)]
+                    info, path = share.create_directory(ros_path)
                 
                 except KeyError:
                 
@@ -4144,7 +4553,7 @@ class Peer(Ports):
                     if info is not None:
                     
                         # Construct a reply.
-                        msg = [ "R"+reply_id ] + info
+                        msg = ["R"+reply_id] + info
                     
                     else:
                     
@@ -4352,7 +4761,7 @@ class Peer(Ports):
             #    msg = ["R"+reply_id, 0x1234]
             #    self._send_list(msg, _socket, address)
             
-            elif code == 0xf:
+            elif code == 0xe or code == 0xf:
             
                 # Set length of file.
                 
@@ -4473,7 +4882,10 @@ class Peer(Ports):
                 elif trailer == "Not found":
                 
                     # Reply with an error message.
-                    msg = ["E"+reply_id, 0x100d6, "Not found"]
+                    self._send_list(
+                        ["E"+reply_id, 0x100d6, "Not found"],
+                        _socket, address
+                        )
             
             except KeyError:
             
@@ -4911,7 +5323,7 @@ class Peer(Ports):
         
         share = RemoteShare(name, host, self.share_messages)
         
-        info = share.open(name)
+        info = share.open("")
         
         if info is not None:
         
