@@ -17,6 +17,14 @@ class Access:
         
         self.hostname = socket.gethostname()
         
+        self.hostaddr = socket.gethostbyaddr(self.hostname)[2][0]
+        
+        at = string.rfind(self.hostaddr, ".")
+        
+        self.broadcast = self.hostaddr[:at] + ".255"
+        
+        # Use just the hostname from the full hostname retrieved.
+        
         at = string.find(self.hostname, ".")
         
         if at != -1:
@@ -53,7 +61,13 @@ class Access:
     
         self._poll_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         
-        self._poll_s.bind(("", 32770))
+        # Allow the socket to broadcast packets.
+        self._poll_s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        
+        # Set the socket to be non-blocking.
+        self._poll_s.setblocking(0)
+        
+        self._poll_s.bind((self.broadcast, 32770))
         
         self.ports[32770] = self._poll_s
     
@@ -61,7 +75,13 @@ class Access:
     
         self._listen_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         
-        self._listen_s.bind(("", 32771))
+        # Allow the socket to broadcast packets.
+        self._listen_s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        
+        # Set the socket to be non-blocking.
+        self._listen_s.setblocking(0)
+        
+        self._listen_s.bind((self.broadcast, 32771))
         
         self.ports[32771] = self._listen_s
     
@@ -69,7 +89,13 @@ class Access:
     
         self._share_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         
-        self._share_s.bind(("", 49171))
+        # Allow the socket to broadcast packets.
+        self._share_s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        
+        # Set the socket to be non-blocking.
+        self._share_s.setblocking(0)
+        
+        self._share_s.bind((self.broadcast, 49171))
         
         self.ports[49171] = self._share_s
     
@@ -105,6 +131,8 @@ class Access:
     
     def interpret(self, data):
     
+        lines = []
+        
         i = 0
         
         while i < len(data):
@@ -135,26 +163,34 @@ class Access:
                 else:
                     s = s + "."
             
-            print "%s : %s" % (words, s)
+            lines.append("%s : %s\n" % (words, s))
             
             i = i + 16
+        
+        return lines
     
     def _read_port(self, port):
     
         if not self.ports.has_key(port):
         
             print "No socket to use for port %i" % port
-            return
+            return []
         
         s = self.ports[port]
         
-        data = s.recv(1024)
+        try:
         
-        if data:
+            data = s.recv(1024)
+            
+            lines = self.interpret(data)
         
-            self.interpret(data)
+        except socket.error:
+        
+            lines = []
+        
+        return lines
     
-    def read_port(self, port):
+    def read_port(self, ports):
     
         t0 = time.time()
         
@@ -164,10 +200,19 @@ class Access:
             
                 t = int(time.time() - t0)
                 
-                print "%i:" % t
+                for port in ports:
                 
-                self._read_port(port)
-                print
+                    lines = self._read_port(port)
+                    
+                    if lines != []:
+                    
+                        print "Port %i:" % port
+                        
+                        for line in lines:
+                        
+                            print line
+                        
+                        print
         
         except KeyboardInterrupt:
         
@@ -192,14 +237,14 @@ class Access:
             self.number(4, 0x00010001) + \
             self.number(4, 0x00000000)
         
-        s.sendto(data, ("", 32770))
+        s.sendto(data, (self.broadcast, 32770))
         
         # Create the second string to send.
         data = \
             self.number(4, 0x00050001) + \
             self.number(4, 0x00000000)
         
-        s.sendto(data, ("", 32770))
+        s.sendto(data, (self.broadcast, 32770))
         
         # Create the host broadcast string.
         data = \
@@ -209,9 +254,9 @@ class Access:
             self.pad_hostname + \
             self.number(4, 0x00003eb9)
         
-        s.sendto(data, ("", 32770))
+        s.sendto(data, (self.broadcast, 32770))
     
-    def broadcast_poll(self, event, delay = 10):
+    def broadcast_poll(self, event, delay = 20):
     
         """broadcast_poll(self)
         
@@ -237,14 +282,31 @@ class Access:
         
             t0 = time.time()
             
-            sys.stdout.write("*")
-            sys.stdout.flush()
-            
-            s.sendto(data, ("", 32770))
+            s.sendto(data, (self.broadcast, 32770))
             
             while int(time.time() - t0) < delay:
             
+                # Read any response.
+                try:
+                
+                    data = s.recv(1024)
+                    
+                    sys.stdout.write("Polling data:\n")
+                    lines = self.interpret(data)
+                    for line in lines:
+                    
+                        sys.stdout.write(line + "\n")
+                    
+                    sys.stdout.flush()
+                
+                except socket.error:
+                
+                    if sys.exc_info()[1].args[0] == 11:
+                    
+                        pass
+                
                 if event.isSet(): return
+            
     
     def broadcast_share(self, name, event, protected = 0, delay = 2):
     
@@ -295,13 +357,24 @@ class Access:
         
             t0 = time.time()
             
-            sys.stdout.write("S")
-            sys.stdout.flush()
-            
-            s.sendto(data, ("", 49171))
+            s.sendto(data, (self.broadcast, 49171))
             
             while int(time.time() - t0) < delay:
             
+                try:
+                
+                    data = s.recv(1024)
+                    
+                    sys.stdout.write("Sharing data:\n")
+                    self.interpret(data)
+                    sys.stdout.flush()
+                
+                except socket.error:
+                
+                    if sys.exc_info()[1].args[0] == 11:
+                    
+                        pass
+                
                 if event.isSet(): return
         
         # Broadcast that the share has now been removed.
@@ -314,6 +387,27 @@ class Access:
             self.number(4, 0x00010000 | len(name)) + \
             pad_name + \
             self.number(4, 0x00000034 | ((protected & 1) << 8))
+    
+    def send_query(self, host):
+    
+        if not self.ports.has_key(32770):
+        
+            print "No socket to use for port %i" % 32770
+            return
+        
+        s = self.ports[32770]
+        
+        # Create a string to send.
+        data = \
+            self.number(4, 0x00050003) + \
+            self.number(4, 0x00010000) + \
+            self.number(4, 0x00040000 | len(self.hostname)) + \
+            self.pad_hostname + \
+            self.number(4, 0x00003eb9)
+        
+        s.sendto(data, (host, 32770))
+        
+        self.read_port([32770, 32771, 49171])
 
 
 
