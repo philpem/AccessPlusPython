@@ -1368,17 +1368,27 @@ class Peer(Common):
     
         host = address[0]
         
-        #print "From: %s:%i" % address
-        #
-        #lines = self.interpret(data)
-        #
+        print "From: %s:%i" % address
+        
+        lines = self.interpret(data)
+        
         #for line in lines:
         #
         #    print line
         #
         #print
-            
-        if data[0] == "A":
+        
+        command = data[0]
+        
+        if len(data) > 4:
+        
+            code = self.str2num(4, data[4:8])
+        
+        else:
+        
+            code = None
+        
+        if command == "A" and code == 0x1:
         
             # Attempt to open a share, directory or path.
             path = self.read_string(
@@ -1391,8 +1401,7 @@ class Peer(Common):
             # The first element is the share name.
             share_name = path_elements[0]
             
-            #print 'Request to open "%s"' % share_name
-            print share_name, path_elements
+            print 'Request to open "%s" using %s' % (share_name, path_elements[1:])
             
             if self.shares.has_key((share_name, self.hostaddr)):
             
@@ -1418,11 +1427,15 @@ class Peer(Common):
                     # Append this path to the shared directory's path.
                     path = os.path.join(directory, path)
                     
+                    print "Path:", path
+                    
                     if not os.path.exists(path):
                     
                         # Look for files with the name given but include those
                         # with various suffixes.
                         files = glob.glob(path + "*")
+                        
+                        print "Files:", files
                         
                         if len(files) == 0:
                         
@@ -1435,6 +1448,8 @@ class Peer(Common):
                         else:
                         
                             path = files[0]
+                    
+                    print "Final path:", path
                     
                     # Try to find the details of the object.
                     if path != "" and os.path.isdir(path):
@@ -1457,7 +1472,7 @@ class Peer(Common):
                         handle = os.stat(path)[1] & 0xffffffff
                         
                         # Keep this handle for possible later use.
-                        self.handles.append( (handle, path) )
+                        self.handles.append( (handle, path, length) )
                         
                         msg = [ "R"+data[1:4], filetype, date, length,
                                 access_attr, object_type, handle ]
@@ -1480,7 +1495,7 @@ class Peer(Common):
                         handle = os.stat(path)[1]# & 0xffffff7f
                         
                         # Keep this handle for possible later use.
-                        self.handles.append( (handle, path) )
+                        self.handles.append( (handle, path, length) )
                         
                         msg = [ "R"+data[1:4], filetype, date, length,
                                 access_attr, object_type, handle ]
@@ -1508,7 +1523,26 @@ class Peer(Common):
                     _socket, address
                     )
         
-        elif data[0] == "B" and self.str2num(4, data[4:8]) == 0x3:
+        elif command == "A" and code == 0xa or code == 0xb:
+        
+            # Rebroadcasted request for information.
+            
+            print "From: %s:%i" % address
+            
+            lines = self.interpret(data)
+            
+            for line in lines:
+            
+                print line
+            
+            print
+            
+            # Reply with an error message.
+            msg = ["E"+data[1:4], 0x163ac, "Shared disc not available."]
+            
+            self._send_list(msg, _socket, address)
+        
+        elif command == "B" and code == 0x3:
         
             # Request for information.
             
@@ -1529,18 +1563,18 @@ class Peer(Common):
             # directory.
             #path = self.construct_directory_name(path_elements[1:])
             
-            print directory, path_elements[1:]
+            #print directory, path_elements[1:]
             
             path = self.from_riscos_filename(
                 string.join(path_elements[1:], ".")
                 )
             
-            print path
+            #print path
             
             # Append this path to the shared directory's path.
             path = os.path.join(directory, path)
                     
-            print 'Request to catalogue "%s"' % path
+            #print 'Request to catalogue "%s"' % path
             
             if not os.path.isdir(path):
             
@@ -1708,7 +1742,7 @@ class Peer(Common):
                     _socket, address
                     )
         
-        elif data[0] == "B" and self.str2num(4, data[4:8]) == 0xb:
+        elif command == "B" and code == 0xb:
         
             # Data request
             
@@ -1716,18 +1750,19 @@ class Peer(Common):
             pos = self.str2num(4, data[12:16])
             length = self.str2num(4, data[16:20])
             
-            print "Data request", hex(handle), pos, length
+            #print "Data request", hex(handle), pos, length
             
             # Match the handle to the file to use.
             path = None
             
             for i in range(len(self.handles) - 1, -1, -1):
             
-                this_handle, this_path = self.handles[i]
+                this_handle, this_path, this_length = self.handles[i]
                 
                 if handle == this_handle:
                 
                     path = this_path
+                    file_length = this_length
                     break
             
             if path is None:
@@ -1735,43 +1770,57 @@ class Peer(Common):
                 # Reply with an error message.
                 msg = ["E"+data[1:4], 0x100d6, "Not found"]
             
+                #print "From: %s:%i" % address
+                #
+                #lines = self.interpret(data)
+                #
+                #for line in lines:
+                #
+                #    print line
+                #print
+            
             else:
             
-                # Remove the entry from the list.
-                self.handles.remove( (handle, path) )
-                
-                print path, pos
-                
                 try:
                 
                     # Read the data from the file.
                     f = open(path, "rb")
                     f.seek(pos, 0)
-                    data = f.read(length)
+                    file_data = f.read(length)
                     f.close()
                     
-                    # Add a trailer onto the end of the data of length
-                    # 0xc if all the data has been written.
-                    if len(data) <= length:
+                    # Calculate the new offset into the file.
+                    new_pos = pos + len(file_data)
                     
-                        trailer = ["B"+data[1:4], len(data), len(data)]
+                    if new_pos >= file_length:
                     
-                    else:
+                        # Remove the entry from the list.
+                        self.handles.remove( (handle, path, file_length) )
                     
-                        # Don't add a trailer but put the entry at the
-                        # end of the list for future use.
-                        trailer = []
-                        self.handles.append( (handle, path) )
-                    
-                    print len(data), length
-                    print "Trailer:", trailer
+                    # Encode the data, adding padding if necessary.
+                    encoded = self._encode([file_data])
                     
                     # Write the message to send.
-                    msg = ["S"+data[1:4], len(data), 0xc, data] + trailer
+                    
+                    # Add a 12 byte trailer onto the end of the data
+                    # containing the amount of data sent and the new
+                    # offset into the file being read.
+
+                    msg = \
+                    [
+                        "S"+data[1:4], len(file_data), 0xc, encoded,
+                        "B"+data[1:4], len(file_data), new_pos
+                    ]
                 
                 except IOError:
                 
                     # Reply with an error message.
+                    #lines = self.interpret(data)
+                    #
+                    #for line in lines:
+                    #
+                    #    print line
+                    #print
                     msg = ["E"+data[1:4], 0x100d6, "Not found"]
             
             #print "Sent:"
@@ -1783,7 +1832,7 @@ class Peer(Common):
             # Send the message.
             self._send_list(msg, _socket, address)
         
-        elif data[0] == "B" and self.str2num(4, data[4:8]) == 0xd:
+        elif command == "B" and code == 0xd:
         
             # Rebroadcasted request for information.
             
@@ -2078,6 +2127,10 @@ class Peer(Common):
         del self.printers[(name, self.hostaddr)]
         del self.printer_events[name]
     
+    def expect_reply(self, new_id, commands, tries = 5, delay = 1):
+    
+        pass
+    
     def info(self, name, host):
     
         """info(self, name, host)
@@ -2336,12 +2389,6 @@ class Peer(Common):
         
         handle = info["handle"]
         
-        #print "Sent:"
-        #for line in self.interpret(self._encode(data)):
-        #
-        #    print line
-        #print
-        
         file_data = []
         pos = 0
         
@@ -2351,6 +2398,12 @@ class Peer(Common):
         while 1:
         
             data = ["B"+new_id, 0xb, handle, pos, 0x800]
+            
+            print "Sent:"
+            for line in self.interpret(self._encode(data)):
+            
+                print line
+            print
             
             # Send the request.
             self._send_list(data, s, (host, 49171))
@@ -2398,6 +2451,12 @@ class Peer(Common):
                 print "The machine containing the shared disc does not respond"
                 return
             
+            #print "Received:"
+            #for line in self.interpret(data):
+            #
+            #    print line
+            #print
+            
             # Read the header.
             length = self.str2num(4, data[4:8])
             trailer_length = self.str2num(4, data[8:12])
@@ -2418,9 +2477,17 @@ class Peer(Common):
                         new_pos, info["length"], name
                         )
                     )
+                sys.stdout.flush()
             
             if pos >= info["length"]:
             
                 break
+        
+        # Close the resource.
+        new_id = self.new_id()
+        data = ["A"+new_id, 0xa, handle]
+        self._send_list(data, s, (host, 49171))
+        
+        # Expect a reply.
         
         return string.join(file_data, "")
