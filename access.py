@@ -1259,22 +1259,31 @@ class Peer(Common):
     
     # Method used in thread for transferring files
     
-    def transfer_file(self, event, reply_id, length, host, path):
+    def transfer_file(self, event, reply_id, length, path, _socket, address):
     
         # This method should only get called once by the thread it belongs
         # to, then the thread should terminate.
         
+        # Read the host name from the address tuple.
+        host = address[0]
+        
         # Wait for a response.
         pos = 0
+        
+        # Set the size of packets we can deal with.
+        # Note that the length parameter passed is the buffer size the remote
+        # client expects. However, we request packets which are small
+        # enough for our receive buffer.
+        packet_size = min(RECV_SIZE - 8, length)
         
         try:
         
             f = open(path, "wb")
             
-            while pos < length:
+            while 1:
             
                 # Construct a list to send to the remote client.
-                msg = ["w", 0, pos, min(RECV_SIZE, length - pos)]
+                msg = ["w", pos, 0, packet_size]
                 
                 self.log("comment", repr(msg), "")
                 
@@ -1288,16 +1297,23 @@ class Peer(Common):
                     return
                 
                 # Read the header.
-                new_pos = self.str2num(4, data[4:8])
-                f.write(data[8:])
+                data_pos = self.str2num(4, data[4:8])
+                print data_pos
                 
-                pos = pos + len(data) - 8
+                if len(data) > 8:
+                
+                    file_data = data[8:]
+                    
+                    f.write(file_data)
+                    pos = pos + len(data) - 8
+                    
+                    print "Read %i bytes of file %s" % (pos, path)
                 
                 # Check the event flag.
                 if event.isSet():
                 
                     f.close()
-                    return
+                    break
             
             # Close the file.
             f.close()
@@ -1306,15 +1322,10 @@ class Peer(Common):
         
             return
         
-        # End the transaction by sending a final request for data.
-        msg = ["w", 0, pos, 0]
-        
-        # Send the request.
-        replied, data = self._send_request(msg, host, ["d"])
-        
-        if replied != 1:
-        
-            return
+        # Send a reply message to indicate that the transfer has finished.
+        msg = ["R"+reply_id, pos, pos]
+        self.log("sent", msg, address)
+        self._send_list(msg, _socket, address)
     
     def read_poll_socket(self):
     
@@ -1821,12 +1832,12 @@ class Peer(Common):
                     # Append this path to the shared directory's path.
                     path = os.path.join(directory, path)
                     
-                    print "Original path:", path
+                    self.log("comment", "Original path: %s" % path, "")
                     
                     # Look for a suitable file.
                     new_path = self.find_relevant_file(path)
                     
-                    print "Open path:", new_path
+                    self.log("comment", "Open path: %s" % new_path, "")
                     
                     if new_path is None and code == 0x4:
                         
@@ -1875,7 +1886,7 @@ class Peer(Common):
                         # file.
                         path = new_path
                     
-                    print "Actual path:", path
+                    self.log("comment", "Actual path: %s" % path, "")
                     
                     # Try to find the details of the object.
                     
@@ -2078,7 +2089,7 @@ class Peer(Common):
                 name = 'Transfer "%s" from %s:%i' % (
                     path, address[0], address[1]
                     ),
-                args = (event, reply_id, new_length, host, path)
+                args = (event, reply_id, new_length, path, _socket, address)
                 )
             
             # Record the thread in the transfers dictionary.
@@ -2779,7 +2790,7 @@ class Peer(Common):
         
             for command in commands:
             
-                if data[:4] == command+new_id:
+                if data[:4] == command + new_id:
                 
                     # Remove the claimed message from the list.
                     self.share_messages.remove(data)
@@ -2798,6 +2809,24 @@ class Peer(Common):
         
         # Return a negative result.
         return 0, (0, "The machine containing the shared disc does not respond")
+    
+    def _all_messages(self, commands, new_id):
+    
+        messages = []
+        
+        for data in self.share_messages:
+        
+            for command in commands:
+            
+                if data[:4] == command + new_id:
+                
+                    # Remove the claimed message from the list.
+                    self.share_messages.remove(data)
+                    
+                    # Add it to the list of messages found.
+                    messages.append(data)
+        
+        return messages
     
     def _expect_reply(self, _socket, data, host, new_id, commands,
                       tries = 5, delay = 2):
@@ -3164,17 +3193,17 @@ class Peer(Common):
         # Convert the filename into a RISC OS filename on the share.
         directory, file = os.path.split(path)
         
-        print file
+        self.log("comment", "File to put: %s" % file, "")
         
         filetype, ros_file = self.suffix_to_filetype(file)
         
-        print ros_file
+        self.log("comment", "Remote file: %s" % ros_file, "")
         
         # Join the path with the share name to obtain a share-relative
         # path.
         ros_path = name + "." + ros_file
         
-        print ros_path
+        self.log("comment", "Remote path: %s" % ros_path, "")
         
         # Create a file on the remote server.
         msg = ["A", 0x4, 0, ros_path+"\x00"]
@@ -3216,7 +3245,7 @@ class Peer(Common):
         # the position in the file of the data requested (like the
         # get method's "B" ... 0xb message.
         reply_id = data[1:4]
-        pos = self.str2num(4, data[8:12])
+        pos = self.str2num(4, data[4:8])
         amount = min(SEND_SIZE, self.str2num(4, data[12:16]))
         
         print pos, amount
@@ -3225,26 +3254,32 @@ class Peer(Common):
         
             f = open(path, "rb")
             
-            pos = 0
-            
             while pos < length:
             
                 f.seek(pos, 0)
                 
                 # Send a message with the amount of data specified.
-                msg = ["d"+reply_id, pos + amount]
+                msg = ["d"+reply_id, pos]
                 self.log("sent", msg, (host, 49171))
                 
-                # Don't pad the data sent.
-                msg = self._encode(msg) + f.read(amount)
+                # Read the data to be sent.
+                file_data = f.read(amount)
                 
-                # Send the request.
-                self._send_list(msg, s, (host, 49171))
+                # Don't pad the data sent.
+                msg = self._encode(msg) + file_data
+                self.log(
+                    "comment",
+                    "%i bytes of data sent in message." % len(file_data),
+                    ""
+                    )
+                
+                # Send the reply as a string.
+                s.sendto(msg, (host, 49171))
                 
                 # Wait for messages to arrive with the same ID as
                 # the one used to specify the file to be uploaded.
                 replied, data = self._expect_reply(
-                    s, msg, host, reply_id, ["w"]
+                    s, msg, host, reply_id, ["w", "R"]
                     )
                 
                 if replied != 1:
@@ -3259,8 +3294,18 @@ class Peer(Common):
                     print "Uploading was terminated."
                     return
                 
-                pos = self.str2num(4, data[4:8])
-                reply_id = data[1:4]
+                #pos = pos + amount
+                if data[0] == "w":
+                
+                    # More data requested.
+                    reply_id = data[1:4]
+                    pos = self.str2num(4, data[4:8])
+                
+                elif data[0] == "R":
+                
+                    pos = self.str2num(4, data[4:8])
+                    total_length = self.str2num(4, data[8:12])
+                    break
                 
                 sys.stdout.write(
                     "\rWritten %i/%i bytes of file %s" % (
@@ -3269,7 +3314,29 @@ class Peer(Common):
                     )
                 sys.stdout.flush()
             
+            # Remove all relevant messages from the message list.
+            messages = self._all_messages(["w", "R"], reply_id)
+            
+            print "Discarded messages."
+            for msg in messages:
+            
+                for line in self.interpret(msg):
+                
+                    print line
+                print
+            
             # When all the data has been sent, send an empty "d" message.
+            msg = ["d"+reply_id, 0]
+            self.log("sent", msg, (host, 49171))
+            
+            self._send_list(msg, s, (host, 49171))
+            
+            sys.stdout.write(
+                '\rFile "%s" (%i bytes) successfully written to "%s"' % (
+                    path, length, ros_path
+                    )
+                )
+            sys.stdout.flush()
         
         except IOError:
         
