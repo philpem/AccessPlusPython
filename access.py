@@ -545,6 +545,10 @@ class Common:
         
         self._log.append("")
     
+    def write_log(self, path):
+    
+        open(path, "w").writelines(map(lambda x: x + "\n", self._log))
+    
     def to_riscos_access(self, mode = 0777, path = None):
     
         """word = to_riscos_access(self, mode = 0777, path = None)
@@ -709,6 +713,140 @@ class Common:
         
         return filetype, date, length, access_attr, object_type, handle
     
+
+
+class File:
+
+    def __init__(self, path):
+    
+        self.pieces = []
+        self.ptr = 0
+        self.path = path
+        
+        if os.path.exists(path):
+        
+            self._length = os.path.getsize(path)
+        
+        else:
+        
+            # Create the object.
+            open(path, "wb").write("")
+            self._length = 0
+    
+    def tell(self):
+    
+        return self.ptr
+    
+    def seek(self, ptr, from_end):
+    
+        if from_end == 0:
+        
+            self.ptr = ptr
+        
+        elif from_end == 1:
+        
+            self.ptr = self.ptr + ptr
+        
+        else:
+        
+            self.ptr = self._length - ptr
+    
+    def read(self, length):
+    
+        if self.pieces != []:
+        
+            # Not done yet. Write the pieces first then read back the
+            # result.
+            pass
+        
+        else:
+        
+            # If there are pieces in the object then read the data from
+            # the underlying file.
+            try:
+            
+                f = open(self.path, "rb")
+                f.seek(self.ptr, 0)
+                file_data = f.read(length)
+                self.ptr = f.tell()
+                f.close()
+                
+                return file_data
+            
+            except IOError:
+            
+                # Maybe we should allow this to be thrown.
+                return ""
+    
+    def write(self, data):
+    
+        self.pieces.append( (self.ptr, data) )
+        self.ptr = self.ptr + len(data)
+        self.length = max(self.ptr, self.length)
+        print self.ptr
+    
+    def length(self):
+    
+        if self.pieces != []:
+        
+            # If there are pieces in the object then determine the file
+            # length from the internal variable.
+            return self._length
+        
+        else:
+        
+            # Otherwise, determine the actual file's length.
+            return os.path.getsize(self.path)
+    
+    def set_length(self, length):
+    
+        self._length = length
+    
+    def close(self):
+    
+        if self.pieces == []:
+        
+            return
+        
+        print self.path, self._length
+        
+        try:
+        
+            # Zero the contents of the file.
+            f = open(self.path, "wb")
+            
+            f.write("\x00" * self._length)
+            
+            f.close()
+            
+            f = open(self.path, "wb+")
+            
+            # Write all the pieces to the path specified at initialisation.
+            for ptr, data in self.pieces:
+            
+                f.seek(ptr, 0)
+                f.write(data)
+            
+            f.flush()
+            # Truncate the file.
+            #f.truncate(self._length)
+            
+            f.close()
+        
+        except IOError:
+        
+            pass
+        
+        # Remove data now that it has been written.
+        self.pieces = []
+    
+class Directory:
+
+    def __init__(path):
+    
+        if not os.path.exists(path):
+        
+            os.mkdir(path)
 
 
 
@@ -1259,8 +1397,8 @@ class Peer(Common):
     
     # Method used in thread for transferring files
     
-    def transfer_file(self, event, reply_id, start, amount, path, length,
-                      _socket, address):
+    def transfer_file(self, event, reply_id, start, amount, fh, _socket,
+                      address):
     
         # This method should only get called once by the thread it belongs
         # to, then the thread should terminate.
@@ -1269,17 +1407,15 @@ class Peer(Common):
         
         end = start + amount
         
-        print "Position:", pos
-        print "Expected amount of data:", amount
-        print "End at:", end
+        self.log("comment", "Position: %i" % pos, "")
+        self.log("comment", "Expected amount of data: %i" % amount, "")
+        self.log("comment", "End at: %i" % end, "")
         
         # Read the host name from the address tuple.
         host = address[0]
         
         try:
         
-            f = open(path, "ab")
-            
             while 1:
             
                 # Set the size of packets we can deal with.
@@ -1314,25 +1450,35 @@ class Peer(Common):
                     # an absolute form.
                     data_pos = self.str2num(4, data[4:8]) + start
                     
-                    print "Data position", data_pos
+                    self.log(
+                        "comment",
+                        "Data position within file: %i" % data_pos, ""
+                        )
                     
                     if len(data) > 8:
                     
                         file_data = data[8:]
                         
-                        f.seek(data_pos, 0)
+                        fh.seek(data_pos, 0)
                         
-                        #self.log("comment", file_data, "")
+                        self.log("comment", file_data, "")
                         
-                        f.write(file_data)
+                        fh.write(file_data)
                         pos = data_pos + len(file_data)
                         
-                        print "Read %i bytes of file %s" % (pos, path)
+                        self.log(
+                            "comment",
+                            "Read %i bytes of file %s" % (pos, fh.path), ""
+                            )
                     
                     elif data_pos >= end:
                     
                         # A short block was received which indicates
                         # that all the data was read.
+                        self.log(
+                            "comment",
+                            "Short block encountered at end of data.", ""
+                            )
                         break
                 
                 else:
@@ -1345,17 +1491,13 @@ class Peer(Common):
                     
                     else:
                     
-                        f.close()
                         return
                 
                 # Check the event flag.
                 if event.isSet():
                 
-                    f.close()
+                    fh.close()
                     break
-            
-            # Close the file.
-            f.close()
         
         except IOError:
         
@@ -1369,13 +1511,14 @@ class Peer(Common):
         # Remove all relevant messages from the message list.
         messages = self._all_messages(["d"], reply_id)
         
-        print "Discarded messages."
+        self.log("comment", "Discarded messages:", "")
         for msg in messages:
         
             for line in self.interpret(msg):
             
-                print line
-            print
+                self.log("comment", line, "")
+            
+            self.log("comment", "", "")
     
     def read_poll_socket(self):
     
@@ -1948,7 +2091,9 @@ class Peer(Common):
                             handle = self.read_path_info(path)
                         
                         # Keep this handle for possible later use.
-                        self.handles[handle] = (path, length)
+                        if not self.handles.has_key(handle):
+                        
+                            self.handles[handle] = Directory(path)
                         
                         msg = [ "R"+reply_id, filetype, date, length,
                                 access_attr, object_type, handle ]
@@ -1961,7 +2106,16 @@ class Peer(Common):
                             handle = self.read_path_info(path)
                         
                         # Keep this handle for possible later use.
-                        self.handles[handle] = (path, length)
+                        if not self.handles.has_key(handle):
+                        
+                            self.handles[handle] = File(path)
+                        
+                        else:
+                        
+                            fh = self.handles[handle]
+                            
+                            # Use the file object's length, if possible.
+                            length = fh.length()
                         
                         if code == 0x4:
                         
@@ -2040,7 +2194,7 @@ class Peer(Common):
                 # Find the relevant file.
                 path = self.find_relevant_file(path)
                 
-                print "Access request:", path
+                #print "Access request:", path
                 
                 # Convert the RISC OS attributes to a mode value.
                 mode = self.from_riscos_access(access_attr)
@@ -2094,15 +2248,25 @@ class Peer(Common):
         
         elif command == "A" and code == 0xa:
         
-            # End of transfer to remote client.
+            # Close file.
             
             handle = self.str2num(4, data[8:12])
             
             # If the handle is in use then remove it from the handle
             # dictionary.
-            if self.handles.has_key(handle):
+            try:
             
+                fh = self.handles[handle]
+                
+                fh.close()
+                
                 del self.handles[handle]
+            
+            except KeyError:
+            
+                # Ideally, reply with an error message about the file handle
+                # used.
+                pass
             
             # Reply with an short message.
             msg = ["R"+reply_id]
@@ -2120,11 +2284,14 @@ class Peer(Common):
             amount = self.str2num(4, data[16:20])
             
             # Translate the handle into a path.
-            path, length = self.handles[handle]
+            fh = self.handles[handle]
             
-            print
-            print path
-            print "Length of file:", length
+            path = fh.path
+            length = fh.length()
+            
+            self.log("comment", "", "")
+            self.log("comment", path, "")
+            self.log("comment", "Length of file: %i" % length, "")
             
             # Extract the host name from the address as it is assumed that
             # communication will be through port 49171.
@@ -2132,11 +2299,21 @@ class Peer(Common):
             
             # Start a new thread to request and handle the incoming data.
             
+            # Create a lock to prevent multiple threads working on the
+            # same file at the same time.
+            if self.transfers.has_key(path):
+            
+                thread, host = self.transfers[path]
+                
+                while thread.isAlive():
+                
+                    pass
+            
             # Create an event to use to inform the thread that it terminate.
             event = threading.Event()
             
             # Record the event in the transfer events dictionary.
-            self.transfer_events[(path, host)] = event
+            self.transfer_events[path] = event
             
             # Create a thread to run the share broadcast loop.
             thread = threading.Thread(
@@ -2144,11 +2321,14 @@ class Peer(Common):
                 name = 'Transfer "%s" from %s:%i' % (
                     path, address[0], address[1]
                     ),
-                args = (event, reply_id, pos, amount, path, length, _socket, address)
+                args = (
+                    event, reply_id, pos, amount, fh,
+                    _socket, address
+                    )
                 )
             
             # Record the thread in the transfers dictionary.
-            self.transfers[(path, host)] = thread
+            self.transfers[path] = thread, host
             
             # Start the thread.
             thread.start()
@@ -2174,39 +2354,24 @@ class Peer(Common):
             handle = self.str2num(4, data[8:12])
             new_length = self.str2num(4, data[12:16])
             
-            print "Set length:", new_length
-            
             try:
             
                 # Find the path and previously recorded file length.
-                path, length = self.handles[handle]
+                fh = self.handles[handle]
                 
                 # Find the current file length.
-                length = os.path.getsize(path)
+                length = fh.length()
                 
-                # Write the new length for this file in this handle's entry.
-                self.handles[handle] = (path, new_length)
+                self.log(
+                    "comment",
+                    "Change length from %i to %i" % (length, new_length), ""
+                    )
                 
                 # If the length is to be changed then open the file for
                 # changing.
                 if length != new_length:
                 
-                    if length < new_length:
-                    
-                        f = open(path, "ab")
-                        
-                        # Extend the file length.
-                        f.seek(0, 2)
-                        f.write("\x00" * (new_length - length))
-                        
-                        f.close()
-                    
-                    elif length > new_length:
-                    
-                        # Truncate the file.
-                        contents = open(path, "rb").read()
-                        
-                        open(path, "wb").write(contents[:new_length])
+                    fh.set_length(new_length)
                 
                 msg = ["R"+reply_id, new_length]
             
@@ -2236,11 +2401,11 @@ class Peer(Common):
             
             try:
             
-                # Read the path on our machine.
-                path, length = self.handles[handle]
+                # Read the file handle of the file on our machine.
+                fh = self.handles[handle]
                 
-                # Convert it to a RISC OS style filetype and path.
-                filetype, ros_path = self.suffix_to_filetype(path)
+                # Convert its path to a RISC OS style filetype and path.
+                filetype, ros_path = self.suffix_to_filetype(fh.path)
                 
                 # Find the filetype and date from the words given.
                 filetype, date = \
@@ -2249,18 +2414,26 @@ class Peer(Common):
                 # Determine the correct suffix to use for the file.
                 new_path = self.filetype_to_suffix(ros_path, filetype)
                 
-                print "%s -> %s" % (path, new_path)
+                #print "%s -> %s" % (fh.path, new_path)
                 
-                # Try to rename the object.
-                os.rename(path, new_path)
+                if fh.path != new_path:
                 
-                del self.handles[handle]
+                    del self.handles[handle]
+                    
+                    # Try to rename the object.
+                    os.rename(fh.path, new_path)
+                    
+                    # Transfer the file handle to the file on the new path.
+                    self.handles[handle] = fh
                 
                 # Construct the new details for the object.
                 filetype, date, length, access_attr, object_type, \
                     handle = self.read_path_info(new_path)
                 
-                self.handles[handle] = (new_path, length)
+                # Keep the length from the original file.
+                length = fh.length()
+                
+                fh.path = new_path
                 
                 # Construct a reply.
                 msg = [ "R"+reply_id, filetype, date, length,
@@ -2486,15 +2659,20 @@ class Peer(Common):
             try:
             
                 # Match the handle to the file to use.
-                path, file_length = self.handles[handle]
+                fh = self.handles[handle]
+                
+                file_length = fh.length()
                 
                 #print path, file_length
                 
                 # Read the data from the file.
-                f = open(path, "rb")
-                f.seek(pos, 0)
-                file_data = f.read(length)
-                f.close()
+                #f = open(path, "rb")
+                #f.seek(pos, 0)
+                #file_data = f.read(length)
+                #f.close()
+                fh.seek(pos, 0)
+                
+                file_data = fh.read(length)
                 
                 # Calculate the new offset into the file.
                 new_pos = pos + len(file_data)
@@ -2615,10 +2793,6 @@ class Peer(Common):
             
                 # Reset the timer and prune the list of handles.
                 t0 = time.time()
-                
-                if len(self.handles) > self.max_handles:
-                
-                    self.handles = self.handles[-self.max_handles:]
             
             if event.isSet(): return
     
@@ -2671,22 +2845,20 @@ class Peer(Common):
         
         # Threads for file transfers to this host
         
-        for (path, host), thread in self.transfers.items():
+        for path, (thread, host) in self.transfers.items():
         
             # Only terminate threads for shares on this host.
-            if host == self.hostaddr:
+            print "Terminating thread for transfer from %s to %s" % \
+                (host, path)
             
-                print "Terminating thread for transfer from %s to %s" % \
-                    (host, path)
-                
-                # We may wish to avoid doing this to prevent incomplete
-                # transfers; we could wait until they have all finished.
-                self.transfer_events[(path, host)].set()
-                
-                # Wait until the thread terminates.
-                while thread.isAlive():
-                
-                    pass
+            # We may wish to avoid doing this to prevent incomplete
+            # transfers; we could wait until they have all finished.
+            self.transfer_events[path].set()
+            
+            # Wait until the thread terminates.
+            while thread.isAlive():
+            
+                pass
         
         # Threads for share broadcasts
         
