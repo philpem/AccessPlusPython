@@ -4,7 +4,7 @@
     Tools for examining data send via UDP from an Access+ station.
 """
 
-import string, socket, sys, time, threading, types
+import os, string, socket, sys, time, threading, types
 
 
 # Define dummy values to use for constants with the _decode methd.
@@ -12,131 +12,8 @@ import string, socket, sys, time, threading, types
 # ignored; their types are the important pieces of information.
 
 
-class Access:
+class Common:
 
-    def __init__(self):
-    
-        # Define a global hostname variable to represent this machine on the local
-        # subnet.
-        
-        self.hostname = socket.gethostname()
-        
-        self.hostaddr = socket.gethostbyaddr(self.hostname)[2][0]
-        
-        at = string.rfind(self.hostaddr, ".")
-        
-        self.broadcast = self.hostaddr[:at] + ".255"
-        
-        self.identity = "1234"
-        
-        # Use just the hostname from the full hostname retrieved.
-        
-        at = string.find(self.hostname, ".")
-        
-        if at != -1:
-        
-            self.hostname = self.hostname[:at]
-        
-        # Define a dictionary to relate port numbers to the sockets
-        # to use.
-        self.broadcasters = {}
-        self.ports = {}
-        
-        # Create sockets to use for polling.
-        self._create_poll_socket()
-        
-        # Create sockets to use for listening.
-        self._create_listener_socket()
-        
-        # Create sockets to use for share details.
-        self._create_share_socket()
-        
-        # Create lists of messages sent to each listening socket.
-        self.share_messages = []
-        
-        # Create lists of open shares on other hosts.
-        
-    
-    def __del__(self):
-    
-        # Close all sockets.
-        for port, _socket in self.broadcasters.items():
-        
-            print "Closing socket for port %i" % port
-            _socket.close()
-    
-    def _create_poll_socket(self):
-    
-        self._poll_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        
-        # Allow the socket to broadcast packets.
-        self._poll_s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        
-        # Set the socket to be non-blocking.
-        self._poll_s.setblocking(0)
-        
-        self._poll_s.bind((self.broadcast, 32770))
-        
-        self.broadcasters[32770] = self._poll_s
-        
-        # Create a socket for listening.
-        self._poll_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        
-        # Set the socket to be non-blocking.
-        self._poll_l.setblocking(0)
-        
-        self._poll_l.bind((self.hostname, 32770))
-        
-        self.ports[32770] = self._poll_l
-    
-    def _create_listener_socket(self):
-    
-        self._listen_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        
-        # Allow the socket to broadcast packets.
-        self._listen_s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        
-        # Set the socket to be non-blocking.
-        self._listen_s.setblocking(0)
-        
-        self._listen_s.bind((self.broadcast, 32771))
-        
-        self.broadcasters[32771] = self._listen_s
-        
-        # Create a socket for listening.
-        self._listen_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        
-        # Set the socket to be non-blocking.
-        self._listen_l.setblocking(0)
-        
-        self._listen_l.bind((self.hostname, 32771))
-        
-        self.ports[32771] = self._listen_l
-    
-    def _create_share_socket(self):
-    
-        self._share_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        
-        # Allow the socket to broadcast packets.
-        self._share_s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        
-        # Set the socket to be non-blocking.
-        self._share_s.setblocking(0)
-        
-        self._share_s.bind((self.broadcast, 49171))
-        
-        self.broadcasters[49171] = self._share_s
-        
-        # Create a socket for listening.
-        self._share_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        
-        # Set the socket to be non-blocking.
-        self._share_l.setblocking(0)
-        
-        self._share_l.bind((self.hostname, 49171))
-        
-        self.ports[49171] = self._share_l
-    
     def str2num(self, size, s):
         """Convert a string of decimal digits to an integer."""
         
@@ -167,6 +44,68 @@ class Access:
         
         return s
     
+    def read_string(self, data, offset = 0, length = None, ending = None, include = 1):
+
+        """string = read_string(offset, length = None, ending = None, include = 1)
+        \r
+        \rReturn a string from the object's internal data area, starting at the offset
+        \rspecified.
+        \r
+        \rIf an ending character is given then data will be read until the ending is
+        \rfound. If a length is specified then this provides an additional constraint
+        \ron the amount of data returned as a string.
+        \r
+        \rThe include flag determines whether the ending, if given, is returned as
+        \rpart of the string.
+        """
+
+        if length == None and ending == None:
+    
+            print 'Internal: Incorrect use of the read_string function.'
+            return ""
+    
+        if length == None:
+    
+            # Read until one of the endings was found
+            new = ''
+            while offset < len(data):
+    
+                c = data[offset]
+                if c in ending:
+                
+                    if include == 1:
+                        new = new + c
+                    break
+                else:
+                    new = new + c
+                
+                offset = offset + 1
+    
+            return new
+    
+        elif ending == None:
+    
+            # Read the number of characters specified
+            return data[:length]
+    
+        else:
+            # Read the number of characters specified until an ending is encountered
+            new = ''
+            for i in range(length):
+    
+                c = data[offset]
+                if c in ending:
+                
+                    if include == 1:
+                        new = new + c
+                    break
+                else:
+                    new = new + c
+                
+                offset = offset + 1
+    
+            return new
+    
     def new_id(self):
     
         if not hasattr(self, "_id"):
@@ -195,6 +134,10 @@ class Access:
         for item in l:
         
             if type(item) == types.IntType:
+            
+                output.append(self.number(4, item))
+            
+            elif type(item) == types.LongType:
             
                 output.append(self.number(4, item))
             
@@ -241,6 +184,165 @@ class Access:
 #                output.append(padded)
 #        
 #        return string.join(output, "")
+    
+
+class Access(Common):
+
+    def __init__(self):
+    
+        # Define a global hostname variable to represent this machine on the local
+        # subnet.
+        
+        self.hostname = socket.gethostname()
+        
+        self.hostaddr = socket.gethostbyaddr(self.hostname)[2][0]
+        
+        at = string.rfind(self.hostaddr, ".")
+        
+        self.broadcast = self.hostaddr[:at] + ".255"
+        
+        self.identity = "1234"
+        
+        # Use just the hostname from the full hostname retrieved.
+        
+        at = string.find(self.hostname, ".")
+        
+        if at != -1:
+        
+            self.hostname = self.hostname[:at]
+        
+        # Define a dictionary to relate port numbers to the sockets
+        # to use.
+        self.broadcasters = {}
+        self.ports = {}
+        
+        # Create sockets to use for polling.
+        self._create_poll_sockets()
+        
+        # Create sockets to use for listening.
+        self._create_listener_sockets()
+        
+        # Create sockets to use for share details.
+        self._create_share_sockets()
+        
+        
+        # Create an event to use to terminate the polling thread.
+        self.poll_event = threading.Event()
+        
+        # Create a thread to call the broadcast_poll method of the
+        # access object.
+        self.poll_thread = threading.Thread(
+            group = None, target = self.broadcast_poll,
+            name = "Poller", args = (self.poll_event,),
+            kwargs = {"delay": 10}
+            )
+        
+        # Maintain a dictionary of known shares and printers. Each of
+        # these will use a separate thread.
+        self.shares = {}
+        self.printers = {}
+        
+        # Keep a dictionary of events to use to communicate with threads.
+        self.share_events = {}
+        self.printer_events = {}
+        
+        # Create lists of messages sent to each listening socket.
+        self.share_messages = []
+        
+        # Maintain a dictionary of open shares, on the local host or
+        # on other hosts.
+        # Each entry in this dictionary is referenced by a tuple containing
+        # the name of the share and the host it resides on and contains the
+        # ID value used to open it.
+        self.open_shares = {}
+    
+    def __del__(self):
+    
+        # Stop any serving threads.
+        self.stop()
+        
+        # Close all sockets.
+        for port, _socket in self.broadcasters.items():
+        
+            print "Closing socket for port %i" % port
+            _socket.close()
+        
+        for port, _socket in self.ports.items():
+        
+            print "Closing socket for port %i" % port
+            _socket.close()
+    
+    def _create_poll_sockets(self):
+    
+        self._poll_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        # Allow the socket to broadcast packets.
+        self._poll_s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        
+        # Set the socket to be non-blocking.
+        self._poll_s.setblocking(0)
+        
+        self._poll_s.bind((self.broadcast, 32770))
+        
+        self.broadcasters[32770] = self._poll_s
+        
+        # Create a socket for listening.
+        self._poll_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        # Set the socket to be non-blocking.
+        self._poll_l.setblocking(0)
+        
+        self._poll_l.bind((self.hostname, 32770))
+        
+        self.ports[32770] = self._poll_l
+    
+    def _create_listener_sockets(self):
+    
+        self._listen_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        # Allow the socket to broadcast packets.
+        self._listen_s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        
+        # Set the socket to be non-blocking.
+        self._listen_s.setblocking(0)
+        
+        self._listen_s.bind((self.broadcast, 32771))
+        
+        self.broadcasters[32771] = self._listen_s
+        
+        # Create a socket for listening.
+        self._listen_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        # Set the socket to be non-blocking.
+        self._listen_l.setblocking(0)
+        
+        self._listen_l.bind((self.hostname, 32771))
+        
+        self.ports[32771] = self._listen_l
+    
+    def _create_share_sockets(self):
+    
+        self._share_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        # Allow the socket to broadcast packets.
+        self._share_s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        
+        # Set the socket to be non-blocking.
+        self._share_s.setblocking(0)
+        
+        self._share_s.bind((self.broadcast, 49171))
+        
+        self.broadcasters[49171] = self._share_s
+        
+        # Create a socket for listening.
+        self._share_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        # Set the socket to be non-blocking.
+        self._share_l.setblocking(0)
+        
+        self._share_l.bind((self.hostname, 49171))
+        
+        self.ports[49171] = self._share_l
     
     def interpret(self, data):
     
@@ -345,6 +447,218 @@ class Access:
         """
         
         s.sendto(self._encode(l), to_addr)
+    
+    def broadcast_startup(self):
+    
+        """broadcast_startup(self)
+        
+        Broadcast startup/availability messages on port 32770.
+        """
+        
+        if not self.broadcasters.has_key(32770):
+        
+            print "No socket to use for port %i" % 32770
+            return
+        
+        s = self.broadcasters[32770]
+        
+        # Create the first message to send.
+        data = [0x00010001, 0x00000000]
+        
+        self._send_list(data, s, (self.broadcast, 32770))
+        
+        # Create the second message to send.
+        data = [0x00050001, 0x00000000]
+        
+        self._send_list(data, s, (self.broadcast, 32770))
+        
+        # Create the host broadcast string.
+        data = \
+        [
+            0x00050002, 0x00010000,
+            (len(self.identity) << 16) | len(self.hostname),
+            self.hostname + self.identity
+        ]
+        
+        self._send_list(data, s, (self.broadcast, 32770))
+    
+    def broadcast_poll(self, event, delay = 20):
+    
+        """broadcast_poll(self)
+        
+        Broadcast a poll on port 32770 every few seconds. Never exits.
+        """
+        
+        if not self.broadcasters.has_key(32770):
+        
+            print "No socket to use for port %i" % 32770
+            return
+        
+        s = self.broadcasters[32770]
+        
+        # Create a string to send.
+        data = \
+        [
+            0x00050004, 0x00010000,
+            (len(self.identity) << 16) | len(self.hostname),
+            self.hostname + self.identity
+        ]
+        
+        while 1:
+        
+            t0 = time.time()
+            
+            self._send_list(data, s, (self.broadcast, 32770))
+            
+            while int(time.time() - t0) < delay:
+            
+                # Read any response.
+                response = self.read_poll_socket()
+                response = self.read_share_socket()
+                
+                if event.isSet(): return
+    
+    def broadcast_share(self, name, event, protected = 0, delay = 10):
+    
+        """broadcast_share(self, name, event, protected = 0, delay = 10)
+        
+        Broadcast the availability of a share every few seconds.
+        """
+        
+        # Broadcast the availability of the share on the polling socket.
+        
+        if not self.broadcasters.has_key(32770):
+        
+            print "No socket to use for port %i" % 32770
+            return
+        
+        s = self.broadcasters[32770]
+        
+        data = \
+        [
+            0x00010002, 0x00010000, 0x00010000 | len(name),
+            name + chr(protected & 1)
+        ]
+        
+        self._send_list(data, s, (self.broadcast, 32770))
+        
+        # Advertise the share on the share socket.
+        
+        if not self.broadcasters.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return
+        
+        s = self.broadcasters[49171]
+        
+        # Create a string to send.
+        data = [0x00000046, 0x00000013, 0x00000000]
+        
+        while 1:
+        
+            t0 = time.time()
+            
+            self._send_list(data, s, (self.broadcast, 49171))
+            
+            while int(time.time() - t0) < delay:
+            
+                # Read any response.
+                #response = self.read_share_socket()
+                
+                if event.isSet(): return
+        
+        # Broadcast that the share has now been removed.
+        
+        s = self.broadcasters[32770]
+        
+        data = \
+        [
+            0x00010003, 0x00010000, 0x00010000 | len(name),
+            name + chr(protected & 1)
+        ]
+    
+    def broadcast_printer(self, name, description, event,
+                          protected = 0, delay = 2):
+    
+        """broadcast_share(self, name, description, event,
+                           protected = 0, delay = 2)
+        
+        Broadcast the availability of a printer every few seconds.
+        """
+        
+        # Broadcast the availability of the printer on the polling socket.
+        
+        if not self.broadcasters.has_key(32770):
+        
+            print "No socket to use for port %i" % 32770
+            return
+        
+        s = self.broadcasters[32770]
+        
+        data = \
+        [
+            0x00020002, 0x00010000,
+            (len(description) << 16) | len(name),
+            name + description
+        ]
+        
+        self._send_list(data, s, (self.broadcast, 32770))
+        
+        # Advertise the share on the share socket.
+        
+        if not self.broadcasters.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return
+        
+        s = self.broadcasters[49171]
+        
+        # Create a string to send.
+        data = [0x00000046, 0x00000013, 0x00000000]
+        
+        while 1:
+        
+            t0 = time.time()
+            
+            self._send_list(data, s, (self.broadcast, 49171))
+            
+            while int(time.time() - t0) < delay:
+            
+                # Read any response.
+                #response = self.read_share_socket(s)
+                
+                if event.isSet(): return
+        
+        # Broadcast that the share has now been removed.
+        
+        s = self.broadcasters[32770]
+        
+        data = \
+        [
+            0x00010003, 0x00010000, 0x00010000 | len(name),
+            name + chr(protected & 1)
+        ]
+    
+    def send_query(self, host):
+    
+        if not self.broadcasters.has_key(32770):
+        
+            print "No socket to use for port %i" % 32770
+            return
+        
+        s = self.broadcasters[32770]
+        
+        # Create a string to send.
+        data = \
+        [
+            0x00050003, 0x00010000,
+            (len(self.identity) << 16) | len(self.hostname),
+            self.hostname + self.identity
+        ]
+        
+        self._send_list(data, s, (host, 32770))
+        
+        self.read_port([32770, 32771, 49171])
     
     def read_poll_socket(self):
     
@@ -607,11 +921,177 @@ class Access:
         if data[0] == "A":
         
             # Attempt to open the directory.
-            print 'Request to open "%s"' % data[12:]
+            share_name = self.read_string(
+                data[12:], ending = "\000", include = 0
+                )
+            
+            print 'Request to open "%s"' % share_name
+            
+            if self.shares.has_key(share_name):
+            
+                # For unprotected shares, reply with details of the share.
+                
+                # Use the first word given but substitute "R" for "A".
+                self._send_list(
+                    ["R"+data[1:4], 0xffffcd00, 0, 0x800, 0x13, 0x102, 0x027cab01],
+                    s, address
+                    )
+            
+            else:
+            
+                # Reply with an error message.
+                self._send_list(
+                    ["E"+data[1:4], 0x163ac, "Shared disc not available."],
+                    s, address
+                    )
+        
+        elif data[0] == "B":
+        
+            # Request for information.
+            
+            share_name = self.read_string(
+                data[16:], ending = "\000", include = 0
+                )
+            
+            print 'Request to catalogue "%s"' % share_name
+            
+            if self.shares.has_key(share_name):
+            
+                # For unprotected shares, return a catalogue to the client.
+                
+                thread, direct = self.shares[share_name]
+                
+                try:
+                
+                    files = os.listdir(direct)
+                
+                except OSError:
+                
+                    files = []
+                
+                # Write the message, starting with the code and ID word.
+                msg = ["S"+data[1:4]]
+                
+                # Write the catalogue information.
+                
+                # The first word is the length of the directory structure
+                # in bytes beginning with the next word.
+                # Calculate this later.
+                msg.append(0)
+                
+                dir_length = 0
+                
+                # The next word is the directory name.
+                msg.append("$")
+                dir_length = dir_length + 4
+                
+                for file in files:
+                
+                    file_msg = []
+                    length = 0
+                    
+                    try:
+                    
+                        path = os.path.join(direct, file)
+                        
+                        # Filetype word
+                        if os.path.isdir(path):
+                        
+                            file_msg.append(0xfffffd49)
+                        
+                        else:
+                        
+                            file_msg.append(0xffffff4b)
+                        
+                        length = length + 4
+                        
+                        # Unknown word
+                        file_msg.append(0)
+                        length = length + 4
+                        
+                        # Length word (0x800 for directory)
+                        if os.path.isdir(path):
+                        
+                            file_msg.append(0x800)
+                        
+                        else:
+                        
+                            file_msg.append(os.path.getsize(path))
+                        
+                        length = length + 4
+                        
+                        # Flags word (0x10 for directory)
+                        if os.path.isdir(path):
+                        
+                            file_msg.append(0x10)
+                        
+                        else:
+                        
+                            file_msg.append(0x03)
+                        
+                        length = length + 4
+                        
+                        # Flags word (0x2 for directory)
+                        if os.path.isdir(path):
+                        
+                            file_msg.append(0x02)
+                        
+                        else:
+                        
+                            file_msg.append(0x01)
+                        
+                        length = length + 4
+                        
+                        # Zero terminated name string
+                        name_string = self._encode([file + "\000"])
+                        
+                        file_msg.append(name_string)
+                        
+                        length = length + len(name_string)
+                    
+                    except OSError:
+                    
+                        file_msg = []
+                        length = 0
+                    
+                    msg = msg + file_msg
+                    dir_length = dir_length + length
+                
+                # The data following the directory structure is concerned
+                # with the share and is like a return value from a share
+                # open request but with a "B" command word like a
+                # catalogue request.
+                msg = msg + \
+                [
+                    "B"+data[1:4], 0xffffcd00, 0, 0x800,
+                    0x13, 0, 0, dir_length,
+                    0xffffffff
+                ]
+                
+                # Fill in the directory length.
+                msg[1] = dir_length
+                
+                print msg
+                
+                # Send the reply.
+                self._send_list(msg, s, address)
+            
+            else:
+            
+                # Reply with an error message.
+                self._send_list(
+                    ["E"+data[1:4], 0x163ac, "Shared disc not available."],
+                    s, address
+                    )
         
         elif data[0] == "R":
         
-            # Successful reply to an open request.
+            # Reply from a successful open request.
+            self.share_messages.append(data)
+        
+        elif data[0] == "S":
+        
+            # Successful request for a catalogue.
             self.share_messages.append(data)
         
         elif data[0] == "E":
@@ -619,290 +1099,14 @@ class Access:
             # Error response to a request.
             self.share_messages.append(data)
         
-        else:
+        lines = self.interpret(data)
         
-            print self.interpret(data)
-            print
+        for line in lines:
         
-    def broadcast_startup(self):
-    
-        """broadcast_startup(self)
+            print line
         
-        Broadcast startup/availability messages on port 32770.
-        """
+        print
         
-        if not self.broadcasters.has_key(32770):
-        
-            print "No socket to use for port %i" % 32770
-            return
-        
-        s = self.broadcasters[32770]
-        
-        # Create the first message to send.
-        data = [0x00010001, 0x00000000]
-        
-        self._send_list(data, s, (self.broadcast, 32770))
-        
-        # Create the second message to send.
-        data = [0x00050001, 0x00000000]
-        
-        self._send_list(data, s, (self.broadcast, 32770))
-        
-        # Create the host broadcast string.
-        data = \
-        [
-            0x00050002, 0x00010000,
-            (len(self.identity) << 16) | len(self.hostname),
-            self.hostname + self.identity
-        ]
-        
-        self._send_list(data, s, (self.broadcast, 32770))
-    
-    def broadcast_poll(self, event, delay = 20):
-    
-        """broadcast_poll(self)
-        
-        Broadcast a poll on port 32770 every few seconds. Never exits.
-        """
-        
-        if not self.broadcasters.has_key(32770):
-        
-            print "No socket to use for port %i" % 32770
-            return
-        
-        s = self.broadcasters[32770]
-        
-        # Create a string to send.
-        data = \
-        [
-            0x00050004, 0x00010000,
-            (len(self.identity) << 16) | len(self.hostname),
-            self.hostname + self.identity
-        ]
-        
-        while 1:
-        
-            t0 = time.time()
-            
-            self._send_list(data, s, (self.broadcast, 32770))
-            
-            while int(time.time() - t0) < delay:
-            
-                # Read any response.
-                response = self.read_poll_socket()
-                response = self.read_share_socket()
-                
-                if event.isSet(): return
-    
-    def broadcast_share(self, name, event, protected = 0, delay = 10):
-    
-        """broadcast_share(self, name, event, protected = 0, delay = 10)
-        
-        Broadcast the availability of a share every few seconds.
-        """
-        
-        # Broadcast the availability of the share on the polling socket.
-        
-        if not self.broadcasters.has_key(32770):
-        
-            print "No socket to use for port %i" % 32770
-            return
-        
-        s = self.broadcasters[32770]
-        
-        data = \
-        [
-            0x00010002, 0x00010000, 0x00010000 | len(name),
-            name + chr(protected & 1)
-        ]
-        
-        self._send_list(data, s, (self.broadcast, 32770))
-        
-        # Advertise the share on the share socket.
-        
-        if not self.broadcasters.has_key(49171):
-        
-            print "No socket to use for port %i" % 49171
-            return
-        
-        s = self.broadcasters[49171]
-        
-        # Create a string to send.
-        data = [0x00000046, 0x00000013, 0x00000000]
-        
-        while 1:
-        
-            t0 = time.time()
-            
-            self._send_list(data, s, (self.broadcast, 49171))
-            
-            while int(time.time() - t0) < delay:
-            
-                # Read any response.
-                #response = self.read_share_socket()
-                
-                if event.isSet(): return
-        
-        # Broadcast that the share has now been removed.
-        
-        s = self.broadcasters[32770]
-        
-        data = \
-        [
-            0x00010003, 0x00010000, 0x00010000 | len(name),
-            name + chr(protected & 1)
-        ]
-    
-    def broadcast_printer(self, name, description, event,
-                          protected = 0, delay = 2):
-    
-        """broadcast_share(self, name, description, event,
-                           protected = 0, delay = 2)
-        
-        Broadcast the availability of a printer every few seconds.
-        """
-        
-        # Broadcast the availability of the printer on the polling socket.
-        
-        if not self.broadcasters.has_key(32770):
-        
-            print "No socket to use for port %i" % 32770
-            return
-        
-        s = self.broadcasters[32770]
-        
-        data = \
-        [
-            0x00020002, 0x00010000,
-            (len(description) << 16) | len(name),
-            name + description
-        ]
-        
-        self._send_list(data, s, (self.broadcast, 32770))
-        
-        # Advertise the share on the share socket.
-        
-        if not self.broadcasters.has_key(49171):
-        
-            print "No socket to use for port %i" % 49171
-            return
-        
-        s = self.broadcasters[49171]
-        
-        # Create a string to send.
-        data = [0x00000046, 0x00000013, 0x00000000]
-        
-        while 1:
-        
-            t0 = time.time()
-            
-            self._send_list(data, s, (self.broadcast, 49171))
-            
-            while int(time.time() - t0) < delay:
-            
-                # Read any response.
-                #response = self.read_share_socket(s)
-                
-                if event.isSet(): return
-        
-        # Broadcast that the share has now been removed.
-        
-        s = self.broadcasters[32770]
-        
-        data = \
-        [
-            0x00010003, 0x00010000, 0x00010000 | len(name),
-            name + chr(protected & 1)
-        ]
-    
-    def send_query(self, host):
-    
-        if not self.broadcasters.has_key(32770):
-        
-            print "No socket to use for port %i" % 32770
-            return
-        
-        s = self.broadcasters[32770]
-        
-        # Create a string to send.
-        data = \
-        [
-            0x00050003, 0x00010000,
-            (len(self.identity) << 16) | len(self.hostname),
-            self.hostname + self.identity
-        ]
-        
-        self._send_list(data, s, (host, 32770))
-        
-        self.read_port([32770, 32771, 49171])
-    
-    def open_share(self, name, host):
-    
-        # Use the non-broadcast socket.
-        if not self.ports.has_key(49171):
-        
-            print "No socket to use for port %i" % 49171
-            return
-        
-        s = self.ports[49171]
-        
-        # Create a string to send. The three bytes following the "A"
-        # character are used to identify the response from the other
-        # client (it passes them back).
-        new_id = self.new_id()
-        
-        data = ["A"+new_id, 1, 0, name]
-        
-        self._send_list(data, s, (host, 49171))
-        
-        while 1:
-        
-            # See if the response has arrived.
-            for data in self.share_messages:
-            
-                if data[:4] == "R"+new_id:
-                
-                    print 'Successfully opened "%s"' % name
-                    self.share_messages.remove(data)
-                    return new_id
-                
-                elif data[:4] == "E"+new_id:
-                
-                    print 'Error: "%s"' % data[8:]
-                    self.share_messages.remove(data)
-                    return None
-
-
-
-class Server:
-
-    def __init__(self):
-    
-        # Create an Access instance.
-        self.access = Access()
-        
-        # Create an event to use to terminate the polling thread.
-        self.poll_event = threading.Event()
-        
-        # Create a thread to call the broadcast_poll method of the
-        # access object.
-        self.poll_thread = threading.Thread(
-            group = None, target = self.access.broadcast_poll,
-            name = "Poller", args = (self.poll_event,),
-            kwargs = {"delay": 10}
-            )
-        
-        # Maintain a dictionary of open shares and printers, and keep a
-        # dictionary of events to use to communicate with them.
-        self.shares = {}
-        self.printers = {}
-        self.share_events = {}
-        self.printer_events = {}
-    
-    def __del__(self):
-    
-        self.stop()
-    
     def serve(self):
     
         """serve(self)
@@ -911,12 +1115,11 @@ class Server:
         """
         
         # Make the server available.
-        self.access.broadcast_startup()
+        self.broadcast_startup()
         
         # Start the polling thread.
         self.poll_thread.start()
         
-        # For now, just return control to the user.
         return
         
         # Serve in a loop which can be terminated by a keyboard interrupt
@@ -925,7 +1128,7 @@ class Server:
         
             while 1:
             
-                self._serve(self)
+                self._serve()
         
         except KeyboardInterrupt:
         
@@ -938,13 +1141,13 @@ class Server:
     def stop(self):
     
         # Terminate all threads.
-        for name, thread in self.shares.items():
+        for name, (thread, directory) in self.shares.items():
         
             print "Terminating thread for share: %s" % name
             self.share_events[name].set()
             
             # Wait until the thread terminates.
-            while self.shares[name].isAlive():
+            while thread.isAlive():
             
                 pass
         
@@ -956,9 +1159,9 @@ class Server:
         
             pass
     
-    def add_share(self, name, protected = 0, delay = 2):
+    def add_share(self, name, directory, protected = 0, delay = 10):
     
-        """add_share(self, name)
+        """add_share(self, name, directory, protected = 0)
         
         Add the named share to the shares available to other hosts.
         """
@@ -976,12 +1179,12 @@ class Server:
         
         # Create a thread to run the share broadcast loop.
         thread = threading.Thread(
-            group = None, target = self.access.broadcast_share,
+            group = None, target = self.broadcast_share,
             name = 'Share "%s"' % name, args = (name, event),
             kwargs = {"protected": protected, "delay": delay}
             )
         
-        self.shares[name] = thread
+        self.shares[name] = (thread, directory)
         
         # Start the thread.
         thread.start()
@@ -1002,7 +1205,8 @@ class Server:
         self.share_events[name].set()
         
         # Wait until the thread terminates.
-        while self.shares[name].isAlive():
+        thread, directory = self.shares[name]
+        while thread.isAlive():
         
             pass
         
@@ -1030,7 +1234,7 @@ class Server:
         
         # Create a thread to run the share broadcast loop.
         thread = threading.Thread(
-            group = None, target = self.access.broadcast_printer,
+            group = None, target = self.broadcast_printer,
             name = 'Printer "%s"' % name, args = (name, event),
             kwargs = {"protected": protected, "delay": delay}
             )
@@ -1064,8 +1268,167 @@ class Server:
         del self.printers[name]
         del self.printer_events[name]
     
-    def read_port(self, ports = [32770, 32771, 49171]):
+    def open_share(self, name, host):
     
-        log = self.access.read_port(ports)
+        """open_share(self, name, host)
         
-        return log
+        Open a share of a given name on the host specified.
+        """
+        
+        # Use the non-broadcast socket.
+        if not self.ports.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return
+        
+        s = self.ports[49171]
+        
+        # Create a string to send. The three bytes following the "A"
+        # character are used to identify the response from the other
+        # client (it passes them back).
+        new_id = self.new_id()
+        
+        data = ["A"+new_id, 1, 0, name]
+        
+        self._send_list(data, s, (host, 49171))
+        
+        replied = 0
+        while replied == 0:
+        
+            # See if the response has arrived.
+            for data in self.share_messages:
+            
+                if data[:4] == "R"+new_id:
+                
+                    print 'Successfully opened "%s"' % name
+                    self.share_messages.remove(data)
+                    
+                    replied = 1
+                    
+                    break
+                
+                elif data[:4] == "E"+new_id:
+                
+                    print 'Error: "%s"' % data[8:]
+                    self.share_messages.remove(data)
+                    
+                    return
+        
+        # Set the open share details.
+        self.open_shares[(name, host)] = new_id
+    
+    def catalogue(self, name, host):
+    
+        """lines = catalogue(self, name, host)
+        
+        Return a catalogue of the files on the named share on the host
+        given.
+        """
+        
+        if not self.open_shares.has_key((name, host)):
+        
+            # This may be required for mounting purposes.
+            pass
+        
+        
+        # Use the non-broadcast socket.
+        if not self.ports.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return
+        
+        s = self.ports[49171]
+        
+        # Create a string to send. The three bytes following the "B"
+        # character are used to identify the response from the other
+        # client (it passes them back). We retrieve them from a
+        # dictionary.
+        new_id = self.new_id()
+        
+        data = ["B"+new_id, 3, 0xffffffff, 0, name]
+        
+        self._send_list(data, s, (host, 49171))
+        
+        replied = 0
+        while replied == 0:
+        
+            # See if the response has arrived.
+            for data in self.share_messages:
+            
+                if data[:4] == "S"+new_id:
+                
+                    self.share_messages.remove(data)
+                    
+                    # Catalogue information was returned.
+                    self.open_shares[(name, host)] = new_id
+                    replied = 1
+                    
+                    break
+                
+                elif data[:4] == "E"+new_id:
+                
+                    print 'Error: "%s"' % data[8:]
+                    self.share_messages.remove(data)
+                    
+                    return []
+        
+        # Read the catalogue information.
+        c = 4
+        
+        # The first word is the length of the directory structure in bytes
+        # beginning with the next word.
+        dir_length = self.str2num(4, data[c:c+4])
+        c = c + 4
+        
+        start = c
+        
+        # The next word is the directory name.
+        c = c + 4
+        
+        lines = []
+        
+        while c < (start + dir_length):
+        
+            # Filetype word
+            filetype = (self.str2num(4, data[c:c+4]) & 0xfff00) >> 8
+            c = c + 4
+            
+            # Unknown word
+            c = c + 4
+            
+            # Length word (0x800 for directory)
+            length = self.str2num(4, data[c:c+4])
+            c = c + 4
+            
+            # Flags word (0x10 for directory)
+            flags1 = self.str2num(4, data[c:c+4])
+            c = c + 4
+            
+            # Flags word (0x2 for directory)
+            flags2 = self.str2num(4, data[c:c+4])
+            c = c + 4
+            
+            # Zero terminated name string
+            name = self.read_string(
+                data, offset = c, ending = "\000", include = 0
+                )
+            
+            c = c + len(name) + 1
+            
+            if c % 4 != 0:
+            
+                c = c + 4 - (c % 4)
+            
+            lines.append(
+                "%s: %03x (%i bytes) %i %i" % (
+                    name, filetype, length, flags1, flags2
+                    )
+                )
+        
+        # The data following the directory structure is concerned
+        # with the share and is like a return value from a share
+        # open request but with a "B" command word like a
+        # catalogue request.
+        
+        
+        return lines
