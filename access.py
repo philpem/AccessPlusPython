@@ -15,6 +15,7 @@ DEFAULT_SUFFIX = os.extsep + "txt"
 between_epochs = ((365 * 70) + 17) * 24 * 360000
 
 RECV_SIZE = 8192
+SEND_SIZE = 8192
 
 
 class Common:
@@ -365,6 +366,7 @@ class Common:
                 # Return the corresponding filetype for this suffix.
                 try:
                 
+                    # Remove the suffix before presenting it to RISC OS.
                     return string.atoi(mapping["Hex"], 16), \
                         self.to_riscos_filename(filename)[:at]
                    
@@ -420,6 +422,39 @@ class Common:
         
             # No mappings declared the filetype used.
             return self.from_riscos_filename(filename) + DEFAULT_SUFFIX
+    
+    def find_relevant_file(self, path, suffix = None):
+    
+        """find_relevant_file(self, path, suffix = None)
+        
+        Given a path for a file without a suffix from RISC OS, find the
+        relevant file on our machine. This relies on the bodies of the
+        filenames being unique.
+        
+        If a suffix is passed this makes the job much easier.
+        """
+        
+        if suffix is None:
+        
+            suffix = ""
+            
+        paths = [path + suffix, path + DEFAULT_SUFFIX, path + os.extsep + "*"]
+        
+        # Look for a file with any suffix that matches
+        # the path given.
+        
+        path = None
+        
+        for path in paths:
+        
+            files = glob.glob(path)
+            
+            if len(files) == 1:
+            
+                # Unique match
+                return files[0]
+        
+        return None
     
     def construct_directory_name(self, elements):
     
@@ -1709,7 +1744,8 @@ class Peer(Common):
                 
                 else:
                 
-                    # Read the directory name associated with this share.
+                    # Read the directory name associated with this share;
+                    # the file mode will also be useful.
                     thread, directory, date, mode = \
                         self.shares[(share_name, self.hostaddr)]
                     
@@ -1723,56 +1759,65 @@ class Peer(Common):
                     # Append this path to the shared directory's path.
                     path = os.path.join(directory, path)
                     
-                    print "Path:", path
+                    print "Original path:", path
                     
-                    if not os.path.exists(path):
+                    # Look for a suitable file.
+                    new_path = self.find_relevant_file(path)
                     
-                        if code == 0x4:
-                        
-                            # File is being sent.
-                            
-                            try:
-                            
-                                # Create an object on the local filesystem.
-                                open(path, "wb").write("")
-                                os.chmod(path, 0666)
-                            
-                            except IOError:
-                            
-                                path = ""
-                            
-                            except OSError:
-                            
-                                os.remove(path)
-                                path = ""
-                        
-                        else:
-                        
-                            # File doesn't exist, so can't be read.
-                            path = ""
+                    print "Open path:", new_path
                     
-                    elif code == 0x4:
+                    if new_path is None and code == 0x4:
+                        
+                        # File is being sent.
+                        
+                        try:
+                        
+                            # Create an object on the local filesystem.
+                            path = path + DEFAULT_SUFFIX
+                            open(path, "wb").write("")
+                            os.chmod(path, mode)
+                        
+                        except IOError:
+                        
+                            path = None
+                        
+                        except OSError:
+                        
+                            os.remove(path)
+                            path = None
+                    
+                    elif new_path is not None and code == 0x4:
                     
                         # File is being sent but one already exists.
                         
                         try:
                         
                             # Create an object on the local filesystem.
-                            open(path, "wb").write("")
-                            os.chmod(path, 0666)
+                            open(new_path, "wb").write("")
+                            os.chmod(new_path, mode)
+                            path = new_path
                         
                         except IOError:
                         
-                            path = ""
+                            path = None
                         
                         except OSError:
                         
                             os.remove(path)
-                            path = ""
+                            path = None
+                    
+                    else:
+                    
+                        # Whether the file exists or not, use the new
+                        # path if we are not creating or overwriting a
+                        # file.
+                        path = new_path
+                    
+                    print "Actual path:", path
                     
                     # Try to find the details of the object.
                     
-                    if path != "" and os.path.isdir(path):
+                    if path is not None and os.path.isdir(path):
                     
                         # A directory
                         
@@ -1785,7 +1830,7 @@ class Peer(Common):
                         msg = [ "R"+reply_id, filetype, date, length,
                                 access_attr, object_type, handle ]
                     
-                    elif path != "" and os.path.isfile(path):
+                    elif path is not None and os.path.isfile(path):
                     
                         # A file
                         
@@ -1832,6 +1877,10 @@ class Peer(Common):
             try:
             
                 path = self.from_riscos_path(data[12:])
+                
+                # Find the relevant file.
+                path = self.find_relevant_file(path)
+                
                 print "Delete request:", path
                 
                 # Construct access attributes for the other client.
@@ -1864,6 +1913,10 @@ class Peer(Common):
             
                 # Read the path on our machine.
                 path = self.from_riscos_path(data[16:])
+                
+                # Find the relevant file.
+                path = self.find_relevant_file(path)
+                
                 print "Access request:", path
                 
                 # Convert the RISC OS attributes to a mode value.
@@ -1996,14 +2049,18 @@ class Peer(Common):
                 # Determine the correct suffix to use for the file.
                 new_path = self.filetype_to_suffix(ros_path, filetype)
                 
-                print new_path
+                print "%s -> %s" % (path, new_path)
                 
                 # Try to rename the object.
                 os.rename(path, new_path)
                 
+                del self.handles[handle]
+                
                 # Construct the new details for the object.
                 filetype, date, length, access_attr, object_type, \
                     handle = self.read_path_info(new_path)
+                
+                self.handles[handle] = (new_path, length)
                 
                 # Construct a reply.
                 msg = [ "R"+reply_id, filetype, date, length,
@@ -2222,6 +2279,8 @@ class Peer(Common):
             pos = self.str2num(4, data[12:16])
             length = self.str2num(4, data[16:20])
             
+            length = min(length, SEND_SIZE)
+            
             #print "Data request", hex(handle), pos, length
             
             try:
@@ -2229,7 +2288,7 @@ class Peer(Common):
                 # Match the handle to the file to use.
                 path, file_length = self.handles[handle]
                 
-                print path, file_length
+                #print path, file_length
                 
                 # Read the data from the file.
                 f = open(path, "rb")
@@ -2249,6 +2308,8 @@ class Peer(Common):
                 # Write the message header.
                 header = ["S"+reply_id, len(file_data), 0xc]
                 
+                self.log("sent", header, address)
+                
                 # Encode the header, adding padding if necessary.
                 header = self._encode(header)
                 
@@ -2256,6 +2317,8 @@ class Peer(Common):
                 # containing the amount of data sent and the new
                 # offset into the file being read.
                 trailer = ["B"+reply_id, len(file_data), new_pos]
+                
+                self.log("sent", trailer, address)
                 
                 # Encode the trailer, adding padding if necessary.
                 trailer = self._encode(trailer)
@@ -2320,7 +2383,7 @@ class Peer(Common):
         
             self.log("received", data, address)
         
-        if msg is not None:
+        if msg is not None and type(msg) != types.StringType:
         
             self.log("sent", msg, address)
     
@@ -2949,7 +3012,7 @@ class Peer(Common):
         
             # Determine the file's relevant filetype and
             # date words.
-            filetype, date = self.make_riscos_filetype_date(path)
+            filetype_word, date_word = self.make_riscos_filetype_date(path)
             
             # Find the length of the file.
             length = os.path.getsize(path)
@@ -3001,36 +3064,6 @@ class Peer(Common):
             print "Cannot send file to client."
             return
         
-        
-        
-        msg = ["A", 0xf, info["handle"], length]
-        
-        # Send the request.
-        replied, data = self._send_request(msg, host, ["R"])
-        
-        if replied != 1:
-        
-            # Tidy up.
-            self._close(info["handle"], host)
-            
-            self.delete(name, host)
-            return
-        
-        # Examine the message queue, looking for "D" messages.
-        reply_id = data[1:4]
-        
-        found = 1
-        while 1:
-        
-            r, d = self._scan_messages(["D"], reply_id)
-            
-            if r == 1:
-                found = 1
-            else:
-                break
-        
-        #return msg
-        
         # Send the new length of the file.
         # If we specify the final word (length word) as zero then this
         # appears to work. This may be because the remote file has been
@@ -3045,12 +3078,56 @@ class Peer(Common):
             # Tidy up.
             self._close(info["handle"], host)
             
-            self.delete(name, host)
+            self.delete(ros_path, host)
             return
         
         # A reply containing two words was returned. Presumably, the
         # second is the length of the file created on the remote machine.
-        length = self.str2num(4, data[8:12])
+        #length = self.str2num(4, data[8:12])
+        
+        # Set the filetype and date stamp.
+        msg = [ "A", 0x10, info["handle"], filetype_word, date_word ]
+        
+        # Send the request.
+        replied, data = self._send_request(msg, host, ["R"])
+        
+        if replied != 1:
+        
+            # Tidy up.
+            self._close(info["handle"], host)
+            
+            self.delete(ros_path, host)
+            return
+        
+        
+#        # Set the file's length.
+#        msg = ["A", 0xf, info["handle"], length]
+#        
+#        # Send the request.
+#        replied, data = self._send_request(msg, host, ["R"])
+#        
+#        if replied != 1:
+#        
+#            # Tidy up.
+#            self._close(info["handle"], host)
+#            
+#            self.delete(ros_path, host)
+#            return
+#        
+#        # Examine the message queue, looking for "D" messages.
+#        reply_id = data[1:4]
+#        
+#        found = 1
+#        while 1:
+#        
+#            r, d = self._scan_messages(["D"], reply_id)
+#            
+#            if r == 1:
+#                found = 1
+#            else:
+#                break
+        
+        #return msg
         
         # Tidy up.
         self._close(info["handle"], host)
@@ -3104,7 +3181,7 @@ class Peer(Common):
         info = self._read_file_info(data)
         
         return info
-
+    
     def settype(self, name, filetype, host):
     
         # Obtain information on the file (open it).
