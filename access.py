@@ -4,7 +4,7 @@ access.py
 
 Tools for examining data sent via UDP from an Access+ station.
 
-Copyright (c) 2003, David Boddie
+Copyright (c) 2003-4 David Boddie
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to

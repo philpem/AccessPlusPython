@@ -1,6 +1,12 @@
-AccessPlusPython
+AccessPlusPython (0.29)
 
-Copyright (c) 2003, David Boddie
+Copyright (c) 2003-4 David Boddie
+
+This software is licensed under the MIT License. See the access.py file
+or http://www.opensource.org/licenses/mit-license.php for more information.
+
+
+Introduction
 
 This is a snapshot of my Access protocol library which can also be run as a
 simple sharing application. It is provided "as is" (read the LICENSE.txt file)
