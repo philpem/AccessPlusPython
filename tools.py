@@ -1219,175 +1219,175 @@ class Access(Common):
             
             try:
             
-#                # For unprotected shares, return a catalogue to the client.
-#                
-#                thread, direct = self.shares[(share_name, self.hostaddr)]
-#                
-#                files = os.listdir(direct)
-#                
-#                # Write the message, starting with the code and ID word.
-#                msg = ["S"+data[1:4]]
-#                
-#                # Write the catalogue information.
-#                
-#                # The first word is the length of the directory structure
-#                # in bytes beginning with the next word.
-#                # Calculate this later.
-#                msg.append(0)
-#                
-#                dir_length = 0
-#                
-#                # The next word is the directory name.
-#                msg.append("$")
-#                dir_length = dir_length + 4
-#                
-#                n_files = 0
-#                
-#                for file in files:
-#                
-#                    file_msg = []
-#                    length = 0
-#                    
-#                    path = os.path.join(direct, file)
-#                    
-#                    try:
-#                    
-#                        # Filetype word
-#                        if os.path.isdir(path):
-#                        
-#                            file_msg.append(0xfffffd49)
-#                        
-#                        else:
-#                        
-#                            file_msg.append(0xffffff4b)
-#                        
-#                        length = length + 4
-#                        
-#                        # Unknown word
-#                        file_msg.append(0)
-#                        length = length + 4
-#                        
-#                        # Length word (0x800 for directory)
-#                        if os.path.isdir(path):
-#                        
-#                            file_msg.append(0x800)
-#                        
-#                        else:
-#                        
-#                            file_msg.append(os.path.getsize(path))
-#                        
-#                        length = length + 4
-#                        
-#                        # Flags word (0x10 for directory)
-#                        if os.path.isdir(path):
-#                        
-#                            file_msg.append(0x10)
-#                        
-#                        else:
-#                        
-#                            file_msg.append(0x03)
-#                        
-#                        length = length + 4
-#                        
-#                        # Flags word (0x2 for directory)
-#                        if os.path.isdir(path):
-#                        
-#                            file_msg.append(0x02)
-#                        
-#                        else:
-#                        
-#                            file_msg.append(0x01)
-#                        
-#                        length = length + 4
-#                        
-#                        # Convert the name into a form suitable for the
-#                        # other client.
-#                        file_name = self.riscos_filename(file)
-#                        
-#                        # Zero terminated name string
-#                        name_string = self._encode([file_name + "\000"])
-#                        
-#                        file_msg.append(name_string)
-#                        
-#                        length = length + len(name_string)
-#                        
-#                        n_files = n_files + 1
-#                    
-#                    except OSError:
-#                    
-#                        file_msg = []
-#                        length = 0
-#                    
-#                    msg = msg + file_msg
-#                    dir_length = dir_length + length
-#                
-#                # The data following the directory structure is concerned
-#                # with the share and is like a return value from a share
-#                # open request but with a "B" command word like a
-#                # catalogue request.
-#                msg = msg + \
-#                [
-#                    "B"+data[1:4], 0xffffcd00, 0x00000000, 0x00000800,
-#                       0x00000013, 0x00000002, 0x00000000, dir_length,
-#                       0xffffffff
-#                ]
-#                
-#                # Fill in the directory length.
-#                msg[1] = dir_length
-#                
-#                # Send the reply.
-#                self._send_list(msg, _socket, address)
+                # For unprotected shares, return a catalogue to the client.
+                
+                thread, direct = self.shares[(share_name, self.hostaddr)]
+                
+                files = os.listdir(direct)
+                
+                # Write the message, starting with the code and ID word.
+                msg = ["S"+data[1:4]]
+                
+                # Write the catalogue information.
+                
+                # The first word is the length of the directory structure
+                # information.
+                # Calculate this later.
+                msg.append(0)
+                
+                # The next word is the length of the following share
+                # information.
+                msg.append(0x24)
+
+                dir_length = 0
+                
+                n_files = 0
+                
+                for file in files:
+                
+                    file_msg = []
+                    length = 0
+                    
+                    path = os.path.join(direct, file)
+                    
+                    try:
+                    
+                        # Filetype word
+                        if os.path.isdir(path):
+                        
+                            file_msg.append(0xfffffd49)
+                        
+                        else:
+                        
+                            file_msg.append(0xffffff4b)
+                        
+                        length = length + 4
+                        
+                        # Unknown word
+                        file_msg.append(0)
+                        length = length + 4
+                        
+                        # Length word (0x800 for directory)
+                        if os.path.isdir(path):
+                        
+                            file_msg.append(0x800)
+                        
+                        else:
+                        
+                            file_msg.append(os.path.getsize(path))
+                        
+                        length = length + 4
+                        
+                        # Flags word (0x10 for directory)
+                        if os.path.isdir(path):
+                        
+                            file_msg.append(0x10)
+                        
+                        else:
+                        
+                            file_msg.append(0x03)
+                        
+                        length = length + 4
+                        
+                        # Flags word (0x2 for directory)
+                        if os.path.isdir(path):
+                        
+                            file_msg.append(0x02)
+                        
+                        else:
+                        
+                            file_msg.append(0x01)
+                        
+                        length = length + 4
+                        
+                        # Convert the name into a form suitable for the
+                        # other client.
+                        file_name = self.riscos_filename(file)
+                        
+                        # Zero terminated name string
+                        name_string = self._encode([file_name + "\000"])
+                        
+                        file_msg.append(name_string)
+                        
+                        length = length + len(name_string)
+                        
+                        n_files = n_files + 1
+                    
+                    except OSError:
+                    
+                        file_msg = []
+                        length = 0
+                    
+                    msg = msg + file_msg
+                    dir_length = dir_length + length
+                
+                # The data following the directory structure is concerned
+                # with the share and is like a return value from a share
+                # open request but with a "B" command word like a
+                # catalogue request.
+                msg = msg + \
+                [
+                    "B"+data[1:4], 0xffffcd00, 0x00000000, 0x00000800,
+                       0x00000013, 0x00000002, 0x00000000, dir_length,
+                       0xffffffff
+                ]
+                
+                # Fill in the directory length.
+                msg[1] = dir_length
+                
+                # Send the reply.
+                self._send_list(msg, _socket, address)
                 
 #                msg = \
 #                [
-#                    "S"+data[1:4], 0x00000020, 0x00000024, 0xfffffd49,
+#                    "S"+data[1:4], 0x0000001c, 0x00000024, 0xfffffd49,
 #                       0x00000000, 0x00000800, 0x00000010, 0x00000002,
 #                       '!Boot\x00',         "B"+data[1:4], 0xffffcd00,
 #                       0x00000000, 0x00000800, 0x00000013, 0x00000000,
-#                       0x00000000, 0x00000010, 0xffffffff
+#                       0x00000000, 0x0000001c, 0xffffffff
 #                    #              Root entry?
 #                ]
 
-                msg = \
-                [
-                    "S"+data[1:4], 0x00000164, 0x00000024, 0xfffffd49,
-                       0x3edb7498, 0x00000800, 0x00000010, 0x00000002,
-                    #  Unknown (0)
-                       '!Boot\x00',            0xfffffd49, 0x3edbc788,
-                       0x00000800, 0x00000010, 0x00000002, 'Apps\x00',
-                       0xfffffd49, 0x3edc21cf, 0x00000800,
-                    #              Unknown (0)
-                       0x00000010, 0x00000002, 'Diversions\x00',
-                                   0xfffffd49, 0x3ee2c0fa, 0x00000800,
-                    #                          Unknown (0)
-                       0x00000010, 0x00000002, 'home\x00',
-                       0xfffffd49, 0x3ee2c386, 0x00000800, 0x00000010,
-                    #              Unknown (0)
-                       0x00000002, 'LaTeX\x00',            0xfffffd49,
-                       0x3edc6049, 0x00000800, 0x00000010, 0x00000002,
-                    #  Unknown (0)
-                       'Manuals\x00',          0xfffffd49, 0x3edfa359,
-                    #                                      Unknown (0)
-                       0x00000800, 0x00000010, 0x00000002, 'Personal\x00',
-                                               0xfffff54b, 0x00000000,
-                    #                                      Unknown (0)
-                       0x000099cc, 0x00000003, 0x00000001, 'Printout\x00',
-                                               0xffffff4b, 0xc9836700,
-                    #                                      Unknown (0)
-                       0x000099cc, 0x00000009, 0x00000001, 'Printout3\x00',
-                                               0xfffffd49, 0x3edcb9cd,
-                    #                                      Unknown (0)
-                       0x00000800, 0x00000010, 0x00000002, 'Public\x00',
-                                   0xfffffd49, 0x3edd06c9, 0x00000800,
-                    #                          Unknown (0)
-                       0x00000010, 0x00000002, 'Utilities\x00',
-                                   0xfffffd49, 0x3edefe4c, 0x00000800,
-                       0x00000010, 0x00000002, 'Work\x00',
-                    "B"+data[1:4], 0xffffcd00, 0x00000000, 0x00000800,
-                       0x00000013, 0x00000002, 0x00000000, 0x00000164,
-                    #              Unknown (0) Unknown (0)
-                       0xffffffff
-                ]
+#                msg = \
+#                [
+#                    "S"+data[1:4], 0x00000164, 0x00000024, 0xfffffd49,
+#                       0x3edb7498, 0x00000800, 0x00000010, 0x00000002,
+#                    #  Unknown (0)
+#                       '!Boot\x00',            0xfffffd49, 0x3edbc788,
+#                       0x00000800, 0x00000010, 0x00000002, 'Apps\x00',
+#                       0xfffffd49, 0x3edc21cf, 0x00000800,
+#                    #              Unknown (0)
+#                       0x00000010, 0x00000002, 'Diversions\x00',
+#                                   0xfffffd49, 0x3ee2c0fa, 0x00000800,
+#                    #                          Unknown (0)
+#                       0x00000010, 0x00000002, 'home\x00',
+#                       0xfffffd49, 0x3ee2c386, 0x00000800, 0x00000010,
+#                    #              Unknown (0)
+#                       0x00000002, 'LaTeX\x00',            0xfffffd49,
+#                       0x3edc6049, 0x00000800, 0x00000010, 0x00000002,
+#                    #  Unknown (0)
+#                       'Manuals\x00',          0xfffffd49, 0x3edfa359,
+#                    #                                      Unknown (0)
+#                       0x00000800, 0x00000010, 0x00000002, 'Personal\x00',
+#                                               0xfffff54b, 0x00000000,
+#                    #                                      Unknown (0)
+#                       0x000099cc, 0x00000003, 0x00000001, 'Printout\x00',
+#                                               0xffffff4b, 0xc9836700,
+#                    #                                      Unknown (0)
+#                       0x000099cc, 0x00000009, 0x00000001, 'Printout3\x00',
+#                                               0xfffffd49, 0x3edcb9cd,
+#                    #                                      Unknown (0)
+#                       0x00000800, 0x00000010, 0x00000002, 'Public\x00',
+#                                   0xfffffd49, 0x3edd06c9, 0x00000800,
+#                    #                          Unknown (0)
+#                       0x00000010, 0x00000002, 'Utilities\x00',
+#                                   0xfffffd49, 0x3edefe4c, 0x00000800,
+#                       0x00000010, 0x00000002, 'Work\x00',
+#                    "B"+data[1:4], 0xffffcd00, 0x00000000, 0x00000800,
+#                       0x00000013, 0x00000002, 0x00000000, 0x00000164,
+#                    #              Unknown (0) Unknown (0)
+#                       0xffffffff
+#                ]
                 
                 print
                 print "Sent:"
@@ -1396,7 +1396,7 @@ class Access(Common):
                     print line
                 print
                 
-                self._send_list(msg, _socket, address)
+#                self._send_list(msg, _socket, address)
             
             except (KeyError, OSError):
             
