@@ -53,7 +53,7 @@ between_epochs = ((365 * 70) + 17) * 24 * 360000L
 # Buffer size configuration
 
 # Amounts we can receive (the other client can send)
-RECV_SIZE = 32768
+RECV_SIZE = 128*1024
 RECV_PPUT_SIZE = 8192
 RECV_GET_SIZE = 8192
 RECV_PGET_SIZE = 16384
@@ -90,8 +90,22 @@ UNPROTECTED_WRITE = USER_WRITE | os.path.stat.S_IWGRP | os.path.stat.S_IWOTH
 ROS_DIR_LENGTH = 0x800
 
 
+# Debugging and logging settings
+
 DEBUG = 1
 LOG_LEVEL = 0   # show all messages
+
+def logging_on(level):
+
+    global DEBUG, LOG_LEVEL
+    DEBUG = 1
+    LOG_LEVEL = max(0, level)
+
+def logging_off():
+
+    global DEBUG
+    DEBUG = 0
+
 
 # Host name configuration
 
@@ -1000,120 +1014,50 @@ class File:
         # The share the file is stored in.
         self.share = share
         
-        if os.path.exists(path):
-        
-            self._length = os.path.getsize(path)
-        
-        else:
+        if not os.path.exists(path):
         
             # Create the object.
             open(path, "wb").write("")
-            self._length = 0
+        
+        # Open the file.
+        self.fh = open(path, "r+w")
     
     def tell(self):
     
-        return self.ptr
+        return self.fh.tell()
     
     def seek(self, ptr, from_end):
     
-        if from_end == 0:
-        
-            self.ptr = ptr
-        
-        elif from_end == 1:
-        
-            self.ptr = self.ptr + ptr
-        
-        else:
-        
-            self.ptr = self._length - ptr
+        self.fh.seek(ptr, from_end)
     
     def read(self, length):
     
-        if self.pieces != []:
-        
-            # Not done yet. Write the pieces first then read back the
-            # result.
-            self.close()
-        
-        if self.pieces == []:
-        
-            # If there are pieces in the object then read the data from
-            # the underlying file.
-            try:
-            
-                f = open(self.path, "rb")
-                f.seek(self.ptr, 0)
-                file_data = f.read(length)
-                self.ptr = f.tell()
-                f.close()
-                
-                return file_data
-            
-            except IOError:
-            
-                # Maybe we should allow this to be thrown.
-                return ""
+        self.fh.read(length)
     
     def write(self, data):
     
-        self.pieces.append( (self.ptr, data) )
-        self.ptr = self.ptr + len(data)
-        self._length = max(self.ptr, self._length)
+        self.fh.write(data)
     
     def length(self):
     
-        if self.pieces != []:
-        
-            # If there are pieces in the object then determine the file
-            # length from the internal variable.
-            return self._length
-        
-        else:
-        
-            # Otherwise, determine the actual file's length.
-            return os.path.getsize(self.path)
-    
-    def set_length(self, length):
-    
-        self._length = length
+        # Determine the actual file's length.
+        return os.path.getsize(self.path)
     
     def close(self):
     
-        if self.pieces == []:
+        # Ensure that no data is still to be read or written.
+        self.fh.flush()
         
-            return
+        # Close the file descriptor.
+        self.fh.close()
+    
+    def truncate(self, length = None):
+    
+        if length is None:
         
-        try:
+            length = self.fh.tell()
         
-            # Zero the contents of the file.
-            f = open(self.path, "wb")
-            
-            f.write("\x00" * self._length)
-            
-            f.close()
-            
-            f = open(self.path, "wb+")
-            
-            # Write all the pieces to the path specified at initialisation.
-            for ptr, data in self.pieces:
-            
-                f.seek(ptr, 0)
-                f.write(data)
-            
-            f.flush()
-            
-            # Truncate the file.
-            f.truncate(self._length)
-            
-            f.close()
-        
-        except IOError:
-        
-            pass
-        
-        # Remove data now that it has been written.
-        self.pieces = []
+        self.fh.truncate(length)
 
 
 class Buffer:
@@ -5406,7 +5350,7 @@ class Peer(Ports):
                     # changing.
                     if length != new_length:
                     
-                        fh.set_length(new_length)
+                        fh.truncate(new_length)
                     
                     msg = ["R"+reply_id, new_length]
                 
