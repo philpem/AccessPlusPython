@@ -1,0 +1,48 @@
+5: Ordinary periodic query
+00050004 00010000 00040006 6b616562 : ............beak
+                         ^
+                         length of following string
+6fae7265 00003eb9                   : er.o.>..
+
+16: Share unprotected HardDisc4
+00010002 00010000 00010009 64726148 : ............Hard
+63736944 00000034                   : Disc4...
+
+22: Don't share unprotected HardDisc4
+00010003 00010000 00010009 64726148 : ............Hard
+63736944 00000034                   : Disc4...
+
+27: Share protected HardDisc4
+00010002 00010000 00010009 64726148 : ............Hard
+       ^                 ^
+       allow share       length of following string
+       
+63736944 00000134                   : Disc4...
+
+32: Don't share protected HardDisc4
+00010003 00010000 00010009 64726148 : ............Hard
+       ^ don't allow share
+
+63736944 00000134                   : Disc4...
+              ^
+              protected share involved
+
+
+
+On boot up, we receive these broadcasts:
+
+14:
+00010001 00000000                   : ........
+
+14:
+00050001 00000000                   : ........
+
+14:
+00050002 00010000 00040006 6b616562 : ............beak
+9f897265 00003eb9                   : er...>..
+
+then usual polling behaviour:
+
+44:
+00050004 00010000 00040006 6b616562 : ............beak
+9f897265 00003eb9                   : er...>..

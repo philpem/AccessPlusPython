@@ -1,0 +1,10 @@
+Directory specific share added using Access+ sharer application.
+
+00010002 00010001 00000000          : ............
+
+The share is removed.
+
+00010003 00010001 00000000          : ............
+
+The specific share added or removed does not appear to affect the data
+broadcast.

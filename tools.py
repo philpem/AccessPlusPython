@@ -1,0 +1,452 @@
+"""
+    tools.py
+    
+    Tools for examining data send via UDP from an Access+ station.
+"""
+
+import string, socket, sys, time, threading
+
+
+
+class Access:
+
+    def __init__(self):
+    
+        # Define a global hostname variable to represent this machine on the local
+        # subnet.
+        
+        self.hostname = socket.gethostname()
+        
+        at = string.find(self.hostname, ".")
+        
+        if at != -1:
+        
+            self.hostname = self.hostname[:at]
+        
+        padding = 4 - (len(self.hostname) % 4)
+        if padding == 4: padding = 0
+        
+        self.pad_hostname = self.hostname + (padding * "\000")
+        
+        # Define a dictionary to relate port numbers to the sockets
+        # to use.
+        self.ports = {}
+        
+        # Create a socket to use for polling.
+        self._create_poll_socket()
+        
+        # Create a socket to use for listening.
+        self._create_listener_socket()
+        
+        # Create a socket to use for share details.
+        self._create_share_socket()
+    
+    def __del__(self):
+    
+        # Close all sockets.
+        for port, _socket in self.ports.items():
+        
+            print "Closing socket for port %i" % port
+            _socket.close()
+    
+    def _create_poll_socket(self):
+    
+        self._poll_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        self._poll_s.bind(("", 32770))
+        
+        self.ports[32770] = self._poll_s
+    
+    def _create_listener_socket(self):
+    
+        self._listen_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        self._listen_s.bind(("", 32771))
+        
+        self.ports[32771] = self._listen_s
+    
+    def _create_share_socket(self):
+    
+        self._share_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        self._share_s.bind(("", 49171))
+        
+        self.ports[49171] = self._share_s
+    
+    def str2num(self, size, s):
+        """Convert a string of decimal digits to an integer."""
+        
+        i = 0
+        n = 0
+        while i < size:
+        
+            n = n | (ord(s[i]) << (i*8))
+            i = i + 1
+        
+        return n
+    
+    def number(self, size, n):
+    
+        """Convert a number to a little endian string of bytes for writing to a binary file."""
+        
+        # Little endian writing
+        
+        s = ""
+        
+        while size > 0:
+        
+            i = n % 256
+            s = s + chr(i)
+    
+            n = n >> 8
+            size = size - 1
+        
+        return s
+    
+    def interpret(self, data):
+    
+        i = 0
+        
+        while i < len(data):
+        
+            # Print the data in big-endian word form.
+            words = []
+            j = i
+            
+            while j < len(data) and j < i + 16:
+            
+                word = self.str2num(4, data[j:j+4])
+                
+                words.append("%08x" % word)
+                
+                j = j + 4
+            
+            words = string.join(words, " ")
+            
+            if len(words) < 35: words = words + (35 - len(words)) * " "
+            
+            # Show the data in string form.
+            s = ""
+            
+            for c in data[i:i+16]:
+            
+                if ord(c) > 31 and ord(c) < 127:
+                    s = s + c
+                else:
+                    s = s + "."
+            
+            print "%s : %s" % (words, s)
+            
+            i = i + 16
+    
+    def _read_port(self, port):
+    
+        if not self.ports.has_key(port):
+        
+            print "No socket to use for port %i" % port
+            return
+        
+        s = self.ports[port]
+        
+        data = s.recv(1024)
+        
+        if data:
+        
+            self.interpret(data)
+    
+    def read_port(self, port):
+    
+        t0 = time.time()
+        
+        try:
+        
+            while 1:
+            
+                t = int(time.time() - t0)
+                
+                print "%i:" % t
+                
+                self._read_port(port)
+                print
+        
+        except KeyboardInterrupt:
+        
+            pass
+    
+    def broadcast_startup(self):
+    
+        """broadcast_startup(self)
+        
+        Broadcast startup/availability messages on port 32770.
+        """
+        
+        if not self.ports.has_key(32770):
+        
+            print "No socket to use for port %i" % 32770
+            return
+        
+        s = self.ports[32770]
+        
+        # Create the first string to send.
+        data = \
+            self.number(4, 0x00010001) + \
+            self.number(4, 0x00000000)
+        
+        s.sendto(data, ("", 32770))
+        
+        # Create the second string to send.
+        data = \
+            self.number(4, 0x00050001) + \
+            self.number(4, 0x00000000)
+        
+        s.sendto(data, ("", 32770))
+        
+        # Create the host broadcast string.
+        data = \
+            self.number(4, 0x00050002) + \
+            self.number(4, 0x00010000) + \
+            self.number(4, 0x00040000 | len(self.hostname)) + \
+            self.pad_hostname + \
+            self.number(4, 0x00003eb9)
+        
+        s.sendto(data, ("", 32770))
+    
+    def broadcast_poll(self, event, delay = 10):
+    
+        """broadcast_poll(self)
+        
+        Broadcast a poll on port 32770 every few seconds. Never exits.
+        """
+        
+        if not self.ports.has_key(32770):
+        
+            print "No socket to use for port %i" % 32770
+            return
+        
+        s = self.ports[32770]
+        
+        # Create a string to send.
+        data = \
+            self.number(4, 0x00050004) + \
+            self.number(4, 0x00010000) + \
+            self.number(4, 0x00040000 | len(self.hostname)) + \
+            self.pad_hostname + \
+            self.number(4, 0x00003eb9)
+        
+        while 1:
+        
+            t0 = time.time()
+            
+            sys.stdout.write("*")
+            sys.stdout.flush()
+            
+            s.sendto(data, ("", 32770))
+            
+            while int(time.time() - t0) < delay:
+            
+                if event.isSet(): return
+    
+    def broadcast_share(self, name, event, protected = 0, delay = 2):
+    
+        """broadcast_share(self, name, event, protected = 0, delay = 2)
+        
+        Broadcast the availability of a share every few seconds.
+        """
+        
+        # Pad the name of the share to fit an integer number of words.
+        padding = 4 - (len(name) % 4)
+        
+        if padding == 4: padding = 0
+        
+        pad_name = name + (padding * "\000")
+        
+        # Broadcast the availability of the share on the polling socket.
+        
+        if not self.ports.has_key(32770):
+        
+            print "No socket to use for port %i" % 32770
+            return
+        
+        s = self.ports[32770]
+        
+        data = \
+            self.number(4, 0x00010002) + \
+            self.number(4, 0x00010000) + \
+            self.number(4, 0x00010000 | len(name)) + \
+            pad_name + \
+            self.number(4, 0x00000034 | ((protected & 1) << 8))
+        
+        # Advertise the share on the share socket.
+        
+        if not self.ports.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return
+        
+        s = self.ports[49171]
+        
+        # Create a string to send.
+        data = \
+            self.number(4, 0x00000046) + \
+            self.number(4, 0x00000013) + \
+            self.number(4, 0x00000000)
+        
+        while 1:
+        
+            t0 = time.time()
+            
+            sys.stdout.write("S")
+            sys.stdout.flush()
+            
+            s.sendto(data, ("", 49171))
+            
+            while int(time.time() - t0) < delay:
+            
+                if event.isSet(): return
+        
+        # Broadcast that the share has now been removed.
+        
+        s = self.ports[32770]
+        
+        data = \
+            self.number(4, 0x00010003) + \
+            self.number(4, 0x00010000) + \
+            self.number(4, 0x00010000 | len(name)) + \
+            pad_name + \
+            self.number(4, 0x00000034 | ((protected & 1) << 8))
+
+
+
+class Server:
+
+    def __init__(self):
+    
+        # Create an Access instance.
+        self.access = Access()
+        
+        # Create an event to use to terminate the polling thread.
+        self.poll_event = threading.Event()
+        
+        # Create a thread to call the broadcast_poll method of the
+        # access object.
+        self.poll_thread = threading.Thread(
+            group = None, target = self.access.broadcast_poll,
+            name = "Poller", args = (self.poll_event,),
+            kwargs = {"delay": 10}
+            )
+        
+        # Maintain a dictionary of open shares and a dictionary of events
+        # to use to communicate with them.
+        self.shares = {}
+        self.events = {}
+    
+    def __del__(self):
+    
+        self.stop()
+    
+    def serve(self):
+    
+        """serve(self)
+        
+        Make the server available and start serving.
+        """
+        
+        # Make the server available.
+        self.access.broadcast_startup()
+        
+        # Start the polling thread.
+        self.poll_thread.start()
+        
+        # For now, just return control to the user.
+        return
+        
+        # Serve in a loop which can be terminated by a keyboard interrupt
+        # (CTRL-C).
+        try:
+        
+            while 1:
+            
+                self._serve(self)
+        
+        except KeyboardInterrupt:
+        
+            pass
+    
+    def _serve(self):
+    
+        pass
+    
+    def stop(self):
+    
+        # Terminate all threads.
+        for name, thread in self.shares.items():
+        
+            print "Terminating thread for share: %s" % name
+            self.events[name].set()
+            
+            # Wait until the thread terminates.
+            while self.shares[name].isAlive():
+            
+                pass
+        
+        # Terminate the polling thread.
+        self.poll_event.set()
+        
+        # Wait until the thread terminates.
+        while self.poll_thread.isAlive():
+        
+            pass
+    
+    def add_share(self, name, protected = 0, delay = 2):
+    
+        """add_share(self, name)
+        
+        Add the named share to the shares available to other hosts.
+        """
+        
+        if self.shares.has_key(name):
+        
+            print "Share is already accessible: %s" % name
+            return
+        
+        # Create an event to use to inform the share that it must be
+        # removed.
+        event = threading.Event()
+        
+        self.events[name] = event
+        
+        # Create a thread to run the share broadcast loop.
+        thread = threading.Thread(
+            group = None, target = self.access.broadcast_share,
+            name = 'Share "%s"' % name, args = (name, event),
+            kwargs = {"protected": protected, "delay": delay}
+            )
+        
+        self.shares[name] = thread
+        
+        # Start the thread.
+        thread.start()
+    
+    def remove_share(self, name):
+    
+        """remove_share(self, name)
+        
+        Remove the named share from the shares available to other hosts.
+        """
+        
+        if not self.shares.has_key(name):
+        
+            print "Share is not currently accessible: %s" % name
+            return
+        
+        # Set the relevant event object's flag.
+        self.events[name].set()
+        
+        # Wait until the thread terminates.
+        while self.shares[name].isAlive():
+        
+            pass
+        
+        # Remove the thread and the event from their respective dictionaries.
+        del self.shares[name]
+        del self.events[name]

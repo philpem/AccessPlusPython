@@ -1,0 +1,24 @@
+Notes about the Access+ protocol
+
+There are three ports which appear to be used by the client:
+
+32770 - periodic broadcasts and notifications
+32771 - unknown
+49171 - share polling and other functions
+
+
+A 24 byte block is periodically broadcast to all machines on the same
+network (apparently, using the netmask 255.0.0.0, although for IP operation
+this may just mean for all machines on the same subnet with netmask
+255.255.255.0) for listeners on port 32770. This block contains something
+like the following (note: big-endian word representation):
+
+Ordinary periodic query
+
+00050004 00010000 00040006 6b616562 : ............beak
+                         ^
+                         length of following string
+6fae7265 00003eb9                   : er.o.>..
+
+Clearly, the host broadcasting the data occurs at byte 12 in the block with
+the length of the hostname string given in byte 8.
