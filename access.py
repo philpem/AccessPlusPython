@@ -11,6 +11,7 @@ DEFAULT_FILETYPE = 0xffd
 DEFAULT_SUFFIX = os.extsep + "txt"
 #DEFAULT_SUFFIX = ""
 DEFAULT_SHARE_DELAY = 30.0
+TIDY_DELAY = 60.0
 
 # Find the number of centiseconds between 1900 and 1970.
 between_epochs = ((365 * 70) + 17) * 24 * 360000
@@ -19,9 +20,14 @@ between_epochs = ((365 * 70) + 17) * 24 * 360000
 
 RECV_SIZE = 16384
 RECV_PUT_SIZE = 8192
+RECV_GET_SIZE = 8192
 
 SEND_SIZE = 16384
 SEND_PPUT_SIZE = 16384
+SEND_GET_SIZE = 4096
+
+
+DEBUG = 1
 
 # Host name configuration
 
@@ -151,20 +157,6 @@ class Common:
             sys.stderr.write(error_msg + "\n")
             raise raise_exception, "Failed to coerce %s using %s." % (args, fn)
     
-    def new_id(self):
-    
-        if not hasattr(self, "_id"):
-        
-            self._id = 1
-        
-        else:
-        
-            self._id = self._id + 0x1001
-            if self._id > 0xffffff:
-                self._id = 1
-        
-        return "%s" % self.number(3, self._id)
-    
     def interpret(self, data):
     
         lines = []
@@ -211,367 +203,6 @@ class Common:
         
         return lines
     
-#    def _decode(self, s, format):
-#    
-#        """
-#        list = _decode(self, string, format)
-#        
-#        Extract the elements from the string supplied using the format
-#        list to a list.
-#        """
-#    
-#        output = []
-#        c = 0
-#        
-#        for i in range(0, len(format)):
-#        
-#            if type(format[i]item) == types.IntType:
-#            
-#                output.append(self.number(4, item))
-#            
-#            else:
-#            
-#                # Pad the string to fit an integer number of words.
-#                padding = 4 - (len(item) % 4)
-#                
-#                if padding == 4: padding = 0
-#                
-#                padded = item + (padding * "\000")
-#                
-#                output.append(padded)
-#        
-#        return string.join(output, "")
-    
-    to_riscos = {os.extsep: "/", " ": "\xa0", os.sep: "."}
-    from_riscos = {"/": os.extsep, "\xa0": " ", ".": os.sep}
-    
-    def _filename(self, name, dict):
-    
-        new = []
-        
-        for c in name:
-        
-            if dict.has_key(c):
-            
-                new.append(dict[c])
-            
-            else:
-            
-                new.append(c)
-        
-        return string.join(new, "")
-    
-    def to_riscos_filename(self, name):
-    
-        return self._filename(name, self.to_riscos)
-    
-    def from_riscos_filename(self, name):
-    
-        return self._filename(name, self.from_riscos)
-    
-    def create_mimemap(self):
-    
-        # Compile a list of paths to check for the MimeMap file.
-        paths = [""]
-        
-        # Look for a MimeMap file in the path used to invoke this program.
-        path, file = os.path.split(sys.argv[0])
-        paths.append(path)
-        
-        f = None
-        
-        for path in paths:
-        
-            try:
-            
-                f = open(os.path.join(path, "MimeMap"), "r")
-                break
-            
-            except IOError:
-            
-                # Loop again.
-                pass
-        
-        if f is None:
-        
-            print "Failed to find MimeMap file."
-            lines = []
-        
-        else:
-        
-            lines = f.readlines()
-            f.close()
-        
-        mappings = []
-        
-        # Read the lines found.    
-        for line in lines:
-        
-            # Strip leading and trailing whitespace and split the string.
-            s = string.strip(line)
-            
-            values = []
-            current = ""
-            
-            # Ignore lines beginning with a "#" character.
-            if s[:1] == "#": continue
-            
-            for c in s:
-            
-                if c not in string.whitespace:
-                
-                    current = current + c
-                
-                elif current != "":
-                
-                    values.append(current)
-                    current = ""
-            
-            if current != "":
-            
-                values.append(current)
-            
-            # The values correspond to various fields; the first is the
-            # MIME type/subtype; the second is the RISC OS name; the third
-            # is the hexadecimal value used for the filetype; the rest
-            # are the extensions to recognise:
-            if len(values) > 3:
-            
-                mappings.append(
-                    { "MIME": values[0], "RISC OS name": values[1],
-                      "Hex": values[2], "Extensions": values[3:] }
-                    )
-        
-        # Store the mappings.
-        self.mimemap = mappings
-    
-    def create_shares(self):
-    
-        # Compile a list of paths to check for the access.cfg file.
-        paths = [""]
-        
-        # Look for a file in the path used to invoke this program.
-        path, file = os.path.split(sys.argv[0])
-        paths.append(path)
-        
-        f = None
-        
-        for path in paths:
-        
-            try:
-            
-                f = open(os.path.join(path, "access.cfg"), "r")
-                break
-            
-            except IOError:
-            
-                # Loop again.
-                pass
-        
-        if f is None:
-        
-            print "Failed to find access.cfg file."
-            lines = []
-        
-        else:
-        
-            lines = f.readlines()
-            f.close()
-        
-        # Read the lines found.
-        for line in lines:
-        
-            # Strip leading and trailing whitespace.
-            s = string.strip(line)
-            
-            values = []
-            current = ""
-            
-            # Ignore lines beginning with a "#" character.
-            if s[:1] == "#": continue
-            
-            for c in s:
-            
-                if c not in string.whitespace:
-                
-                    current = current + c
-                
-                elif current != "":
-                
-                    values.append(current)
-                    current = ""
-            
-            if current != "":
-            
-                values.append(current)
-            
-            # The values correspond to various fields corresponding to the
-            # following syntax:
-            #
-            # <share> <path> <mode> <delay> <translation> <filetype>
-            #
-            # The "share" parameter is the name by which other clients
-            # refer to the contents of the shared directory.
-            #
-            # The "path" is the path on the local filesystem which can be
-            # navigated by other clients.
-            #
-            # The "mode" is an octal value describing a mask to apply to
-            # the files and directories in the shared directory. This
-            # is loosely translated into a value for the protected flag
-            # which is understood by RISC OS clients.
-            #
-            # The "delay" parameter sets the delay between availability
-            # broadcasts on the network. This can be disabled by supplying
-            # the value "off" (without quotes) or set to the default value
-            # using the value "default".
-            #
-            # The "translation" parameter is either "suffix" or "truncate"
-            # indicating that filename suffixes are either to be presented
-            # to other clients or truncated.
-            #
-            # A final parameter is the default filetype to be used for
-            # files whose type cannot be determined using the MimeMap
-            # file. This should take the form of a twelve bit integer in
-            # Python or C hexadecimal form, e.g. 0xfff.
-            #
-            # myshare /home/user/myfile 0644 off truncate 0xffd
-            
-            if len(values) == 6:
-            
-                # Try to create this share.
-                name, path, mode, delay, present, filetype = values[0:6]
-                
-                self.add_share(name, path, mode, delay, present, filetype)
-                
-            elif len(values) > 0:
-            
-                sys.stderr.write(
-                    "Bad or incomplete share description: %s\n" % line
-                    )
-    
-    def suffix_to_filetype(self, filename):
-    
-        # Find the appropriate filetype to use for the filename given.
-        at = string.rfind(filename, os.extsep)
-        
-        if at == -1:
-        
-            # No suffix: return the default filetype.
-            return DEFAULT_FILETYPE, self.to_riscos_filename(filename)
-        
-        # The suffix includes the "." character. Remove this platform's
-        # separator and replace it with a ".".
-        suffix = "." + filename[at+len(os.extsep):]
-        
-        # Find the suffix in the list of mappings.
-        for mapping in self.mimemap:
-        
-            if suffix in mapping["Extensions"]:
-            
-                # Return the corresponding filetype for this suffix.
-                try:
-                
-                    # Remove the suffix before presenting it to RISC OS.
-                    return string.atoi(mapping["Hex"], 16), \
-                        self.to_riscos_filename(filename)[:at]
-                   
-                except ValueError:
-                
-                    # The value found was not in a valid hexadecimal
-                    # representation. Return the default filetype.
-                    return DEFAULT_FILETYPE, \
-                        self.to_riscos_filename(filename)
-        
-        # No mappings declared the suffix used.
-        return DEFAULT_FILETYPE, self.to_riscos_filename(filename)
-    
-    def filetype_to_suffix(self, filename, filetype):
-    
-        # Find the appropriate filetype to use for the filename given.
-        at = string.rfind(filename, "/")
-        
-        if at != -1:
-        
-            # The suffix includes the "/" character. Replace it with this
-            # platform's separator and ignore the filetype.
-            return self.from_riscos_filename(filename)
-        
-        # Find a choice of suffixes to use in the list of mappings.
-        suffixes = None
-        
-        for mapping in self.mimemap:
-        
-            # Convert the MimeMap entry's filetype to a string.
-            if filetype == string.atoi(mapping["Hex"], 16):
-            
-                # Return the first corresponding suffix.
-                try:
-                
-                    suffixes = mapping["Extensions"]
-                    
-                    if len(suffixes) > 0:
-                    
-                        break
-                
-                except KeyError:
-                
-                    pass
-        
-        if suffixes is not None:
-        
-            # Choose the first available suffix.
-            return self.from_riscos_filename(filename) + \
-                os.extsep + suffixes[0][1:]
-        
-        else:
-        
-            # No mappings declared the filetype used.
-            return self.from_riscos_filename(filename) + DEFAULT_SUFFIX
-    
-    def find_relevant_file(self, path, suffix = None):
-    
-        """find_relevant_file(self, path, suffix = None)
-        
-        Given a path for a file without a suffix from RISC OS, find the
-        relevant file on our machine. This relies on the bodies of the
-        filenames being unique.
-        
-        If a suffix is passed this makes the job much easier.
-        """
-        
-        if suffix is None:
-        
-            suffix = ""
-            
-        paths = [path + suffix, path + DEFAULT_SUFFIX, path + os.extsep + "*"]
-        
-        # Look for a file with any suffix that matches
-        # the path given.
-        
-        path = None
-        
-        for path in paths:
-        
-            files = glob.glob(path)
-            
-            if len(files) == 1:
-            
-                # Unique match
-                return files[0]
-        
-        return None
-    
-    def construct_directory_name(self, elements):
-    
-        built = ""
-        
-        for element in elements:
-        
-            built = os.path.join(built, element)
-        
-        return built
-    
     def from_riscos_time(self, value):
     
         # RISC OS time is given as a five byte block containing the
@@ -591,6 +222,10 @@ class Common:
             # Find the number of seconds since the Epoch using the time tuple
             # given.
             seconds = time.mktime(ttuple)
+        
+        elif seconds is None:
+        
+            seconds = time.mktime(self.date)
         
         # Add the number of centiseconds to the number elapsed between 1900
         # and the Epoch (assuming 1970 for this value).
@@ -633,198 +268,7 @@ class Common:
         
         return filetype, date
     
-    def log(self, direction, data, address):
-    
-        if self.debug == 0: return
-        
-        if direction[0] == "s":
-        
-            lines = ["Sent to %s:%i" % address] + \
-                self.interpret(self._encode(data))
-                
-            self._log = self._log + lines
-        
-        elif direction[0] == "r":
-        
-            lines = ["Received from %s:%i" % address] + \
-                self.interpret(data)
-            
-            self._log = self._log + lines
-        
-        else:
-        
-            self._log.append(data)
-        
-        self._log.append("")
-    
-    def write_log(self, path):
-    
-        open(path, "w").writelines(map(lambda x: x + "\n", self._log))
-    
-    def to_riscos_access(self, mode = 0777, path = None):
-    
-        """word = to_riscos_access(self, mode = 0777, path = None)
-        
-        Return a word representing the RISC OS access flags roughly
-        equivalent to the read, write and execute flags for a local file,
-        given as an octal number in integer form.
-        
-        If a path is given then its mode is determined and used instead.
-        """
-        
-        if path is not None:
-        
-            mode = os.stat(path)[os.path.stat.ST_MODE]
-        
-        # Owner permissions
-        owner_read = (mode & os.path.stat.S_IRUSR) != 0
-        owner_write = ((mode & os.path.stat.S_IWUSR) != 0) << 1
-        owner_execute = ((mode & os.path.stat.S_IXUSR) != 0) << 2
-        
-        owner = owner_read | owner_write | owner_execute
-        
-        # Ignore group permissions.
-        
-        # Permissions for others
-        others_read = ((mode & os.path.stat.S_IROTH) != 0) << 4
-        others_write = ((mode & os.path.stat.S_IWOTH) != 0) << 5
-        #others_execute = (mode & os.path.stat.S_IXOTH) != 0
-        
-        others = others_read | others_write
-        
-        return owner | others
-    
-    def from_riscos_access(self, word):
-    
-        """mode = from_riscos_access(self, word)
-        
-        Return a mode value representing the read, write and execute flags
-        for a local file, given as an octal number in integer form roughly
-        equivalent to the RISC OS access flags.
-        """
-        
-        # Owner permissions
-        owner_read = ((word & 0x01) != 0) * os.path.stat.S_IRUSR
-        owner_write = ((word & 0x02) != 0) * os.path.stat.S_IWUSR
-        owner_execute = ((word & 0x04) != 0) * os.path.stat.S_IXUSR
-        
-        owner = owner_read | owner_write | owner_execute
-        
-        # Permissions for others
-        others_read = ((word & 0x10) != 0) * os.path.stat.S_IROTH
-        others_write = ((word & 0x20) != 0) * os.path.stat.S_IWOTH
-        
-        others = others_read | others_write
-        
-        # Group permissions
-        group = others
-        
-        return owner | group | others
-    
-    def repr_mode(self, mode):
-    
-        """string = repr_mode(self, mode)
-        
-        Returns a string showing the access permissions for a file, given
-        as an octal number in integer form.
-        """
-        
-        # Use shortcuts to construct a string with as little code as
-        # possible.
-        
-        # Owner permissions
-        ow_r = ["-", "r"][(mode & os.path.stat.S_IRUSR) != 0]
-        ow_w = ["-", "w"][(mode & os.path.stat.S_IWUSR) != 0]
-        ow_e = ["-", "x"][(mode & os.path.stat.S_IXUSR) != 0]
-        
-        owner = ow_r + ow_w + ow_e
-        
-        # Group permissions.
-        g_r = ["-", "r"][(mode & os.path.stat.S_IRGRP) != 0]
-        g_w = ["-", "w"][(mode & os.path.stat.S_IWGRP) != 0]
-        g_e = ["-", "x"][(mode & os.path.stat.S_IXGRP) != 0]
-        
-        group = g_r + g_w + g_e
-        
-        # Permissions for others
-        ot_r = ["-", "r"][(mode & os.path.stat.S_IROTH) != 0]
-        ot_w = ["-", "w"][(mode & os.path.stat.S_IWOTH) != 0]
-        ot_e = ["-", "x"][(mode & os.path.stat.S_IXOTH) != 0]
-        
-        others = ot_r + ot_w + ot_e
-        
-        return owner + group + others
-    
-    def to_riscos_objtype(self, path):
-    
-        if not os.path.exists(path):
-        
-            return 0
-        
-        elif os.path.isfile(path):
-        
-            return 0x0101
-        
-        elif os.path.isdir(path):
-        
-            return 0x2
-        
-        else:
-        
-            return 0
-    
-    def from_riscos_path(self, _string):
-    
-        path = self.read_string(
-            _string, ending = "\x00", include = 0
-            )
-        
-        # Split the path up into elements.
-        path_elements = string.split(path, ".")
-        
-        # The first element is the share name.
-        share_name = path_elements[0]
-        
-        # Read the directory name associated with this share.
-        share = self.shares[(share_name, Hostaddr)]
-        
-        # Construct a path to the object below the shared
-        # directory.
-        path = self.from_riscos_filename(
-            string.join(path_elements[1:], ".")
-            )
-        
-        # Append this path to the shared directory's path.
-        path = os.path.join(share.directory, path)
-        
-        return path
-    
-    def read_path_info(self, path):
-    
-        # Determine the file's relevant filetype and
-        # date words.
-        filetype, date = self.make_riscos_filetype_date(path)
-        
-        # Find the length of the file.
-        if os.path.isdir(path):
-        
-            length = 0x800
-        
-        else:
-        
-            length = os.path.getsize(path)
-        
-        # Construct access attributes for the other client.
-        access_attr = self.to_riscos_access(path = path)
-        
-        # Use a default value for the object type.
-        object_type = self.to_riscos_objtype(path = path)
-        
-        # Use the inode of the file as its handle.
-        handle = os.stat(path)[os.path.stat.ST_INO]# & 0xffffff7f
-        
-        return filetype, date, length, access_attr, object_type, handle
-    
+
 
 
 # Sockets and ports
@@ -847,6 +291,8 @@ class Ports(Common):
         
         # Create sockets to use for share details.
         self._create_share_sockets()
+        
+        if DEBUG == 1 and not hasattr(self, "_log"): Ports._log = []
     
     def _create_poll_sockets(self):
     
@@ -970,6 +416,37 @@ class Ports(Common):
         
         return string.join(output, "")
     
+#    def _decode(self, s, format):
+#    
+#        """
+#        list = _decode(self, string, format)
+#        
+#        Extract the elements from the string supplied using the format
+#        list to a list.
+#        """
+#    
+#        output = []
+#        c = 0
+#        
+#        for i in range(0, len(format)):
+#        
+#            if type(format[i]item) == types.IntType:
+#            
+#                output.append(self.number(4, item))
+#            
+#            else:
+#            
+#                # Pad the string to fit an integer number of words.
+#                padding = 4 - (len(item) % 4)
+#                
+#                if padding == 4: padding = 0
+#                
+#                padded = item + (padding * "\000")
+#                
+#                output.append(padded)
+#        
+#        return string.join(output, "")
+    
     def _send_list(self, l, s, to_addr):
     
         """send_list(self, list, socket, to_addr)
@@ -978,8 +455,337 @@ class Ports(Common):
         using the _encode method then send it on the socket provided.
         """
         
+        self.log("sent", l, to_addr)
+        
         s.sendto(self._encode(l), to_addr)
     
+    def _expect_reply(self, _socket, msg, host, new_id, commands,
+                      tries = 5, delay = 2):
+    
+        replied = 0
+        
+        # Keep a record of the time of the previous request.
+        t0 = time.time()
+        
+        while tries > 0:
+        
+            # See if the response has arrived.
+            replied, data = self.messages._scan_messages(commands, new_id)
+            
+            # If a message was found or an error occurred then return
+            # immediately.
+            if replied != 0:
+            
+                return replied, data
+            
+            t1 = time.time()
+            
+            if replied == 0 and (t1 - t0) > 1.0:
+            
+                # Send the request again.
+                self._send_list(msg, _socket, (host, 49171))
+                
+                t0 = t1
+                tries = tries - 1
+        
+        # Return a negative result.
+        return 0, (0, "The machine containing the shared disc does not respond")
+    
+    def new_id(self):
+    
+        if not hasattr(self, "_id"):
+        
+            self._id = 1
+        
+        else:
+        
+            self._id = self._id + 0x1001
+            if self._id > 0xffffff:
+                self._id = 1
+        
+        return "%s" % self.number(3, self._id)
+    
+    def _send_request(self, msg, host, commands, new_id = None, tries = 5,
+                      delay = 2):
+    
+        """replied, data = _send_reqest(self, msg)
+        
+        Send a message via the non-broadcast share port to a remote client
+        and wait for a reply.
+        """
+        # Use the non-broadcast socket.
+        if not self.ports.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return 0, []
+        
+        s = self.ports[49171]
+        
+        if new_id is None:
+        
+            # Use a new ID for this message.
+            new_id = self.new_id()
+        
+        # Create the command to send. The three bytes following the
+        # command character are used to identify the response from the
+        # other client (it passes them back in its response).
+        msg[0] = msg[0] + new_id
+        
+        # Send the request.
+        self._send_list(msg, s, (host, 49171))
+        
+        # Wait for a reply.
+        replied, data = \
+            self._expect_reply(s, msg, host, new_id, commands, tries, delay)
+        
+        #if replied == 1:
+        #
+        #    self.log("received", data, (host, 49171))
+        #
+        #else:
+        #
+        #    # The data value is a tuple if an error occurs.
+        #    self.log("received", data[1], (host, 49171))
+        
+        return replied, data
+    
+    def log(self, direction, data, address):
+    
+        if DEBUG == 0: return
+        
+        if direction[0] == "s" and type(data) == types.ListType:
+        
+            lines = ["Sent to %s:%i" % address] + \
+                self.interpret(self._encode(data))
+                
+            Ports._log = Ports._log + lines
+        
+        elif direction[0] == "s" and type(data) == types.StringType:
+        
+            lines = ["Sent to %s:%i" % address] + \
+                self.interpret(data)
+                
+            Ports._log = Ports._log + lines
+        
+        elif direction[0] == "r":
+        
+            lines = ["Received from %s:%i" % address] + \
+                self.interpret(data)
+            
+            Ports._log = Ports._log + lines
+        
+        else:
+        
+            Ports._log.append(data)
+        
+        Ports._log.append("")
+    
+    def write_log(self, path):
+    
+        open(path, "w").writelines(map(lambda x: x + "\n", Ports._log))
+
+
+
+class Files:
+
+    def __init__(self):
+    
+        # Keep a dictionary of local file handles in use but limit its length.
+        self.max_handles = 100
+        self.handles = {}
+    
+    def __getitem__(self, item):
+    
+        # Return the item as in a normal dictionary.
+        return self.handles[item]
+    
+    def __setitem__(self, item, value):
+    
+        # Add an entry as in a normal handles.
+        self.handles[item] = value
+    
+    def __delitem__(self, item):
+    
+        del self.handles[item]
+    
+    def __cmp__(self, other):
+    
+        if isinstance(other, Match):
+        
+            return self.handles == other.handles
+        
+        else:
+        
+            return self == other
+    
+    def clear(self):
+    
+        return self.handles.clear()
+    
+    def copy(self):
+    
+        return self.handles.copy()
+    
+    def get(self, item, default = None):
+    
+        return self.handles(item, default)
+    
+    def has_key(self, item):
+    
+        return self.handles.has_key(item)
+    
+    def items(self):
+    
+        return self.handles.items()
+    
+    def keys(self):
+    
+        return self.handles.keys()
+    
+    def popitem(self):
+    
+        return self.handles.popitem()
+    
+    def setdefault(self, item, default = None):
+    
+        return self.handles.setdefault(item, default)
+    
+    def update(self, dict):
+    
+        return self.handles.update(dict)
+    
+    def values(self):
+    
+        return self.handles.values()
+
+
+class Messages:
+
+    def __init__(self):
+    
+        self.messages = []
+    
+    def __getitem__(self, item):
+    
+        # Return the item as in a normal dictionary.
+        return self.messages[item]
+    
+    def __setitem__(self, item, value):
+    
+        # Add an entry as in a normal messages.
+        self.messages[item] = value
+    
+    def __delitem__(self, item):
+    
+        del self.messages[item]
+    
+    def __cmp__(self, other):
+    
+        if isinstance(other, Match):
+        
+            return self.messages == other.messages
+        
+        else:
+        
+            return self == other
+    
+    def __len__(self):
+    
+        return len(self.messages)
+    
+    def clear(self):
+    
+        return self.messages.clear()
+    
+    def copy(self):
+    
+        return self.messages.copy()
+    
+    def get(self, item, default = None):
+    
+        return self.messages(item, default)
+    
+    def has_key(self, item):
+    
+        return self.messages.has_key(item)
+    
+    def items(self):
+    
+        return self.messages.items()
+    
+    def keys(self):
+    
+        return self.messages.keys()
+    
+    def popitem(self):
+    
+        return self.messages.popitem()
+    
+    def setdefault(self, item, default = None):
+    
+        return self.messages.setdefault(item, default)
+    
+    def update(self, dict):
+    
+        return self.messages.update(dict)
+    
+    def values(self):
+    
+        return self.messages.values()
+    
+    def append(self, value):
+    
+        self.messages.append(value)
+    
+    def remove(self, value):
+    
+        self.messages.remove(value)
+    
+    def _scan_messages(self, commands, new_id):
+    
+        for data in self.messages:
+        
+            for command in commands:
+            
+                if data[:4] == command + new_id:
+                
+                    # Remove the claimed message from the list.
+                    self.messages.remove(data)
+                    
+                    #self.data = data
+                    
+                    # Reply indicating that valid data was received.
+                    return 1, data
+                
+            if data[:4] == "E"+new_id:
+            
+                #print 'Error: "%s"' % data[8:]
+                self.messages.remove(data)
+                
+                return -1, (self.str2num(4, data[4:8]), data[8:])
+        
+        # Return a negative result.
+        return 0, (0, "The machine containing the shared disc does not respond")
+    
+    def _all_messages(self, commands, new_id):
+    
+        messages = []
+        
+        for data in self.messages:
+        
+            for command in commands:
+            
+                if data[:4] == command + new_id:
+                
+                    # Remove the claimed message from the list.
+                    self.messages.remove(data)
+                    
+                    # Add it to the list of messages found.
+                    messages.append(data)
+        
+        return messages
+    
+
 
 
 class ConfigError(Exception):
@@ -990,11 +796,14 @@ class ConfigError(Exception):
 
 class File:
 
-    def __init__(self, path):
+    def __init__(self, path, share):
     
         self.pieces = []
         self.ptr = 0
         self.path = path
+        
+        # The share the file is stored in.
+        self.share = share
         
         if os.path.exists(path):
         
@@ -1183,17 +992,417 @@ class ShareError(Exception):
 
     pass
 
-class Share(Ports):
+
+class Translate:
+
+    def __init__(self, directory = None):
+    
+        # Look for a MimeMap file in the path used to invoke this program.
+        path, file = os.path.split(sys.argv[0])
+        
+        paths = [ "MimeMap",
+                  os.path.join(path, "MimeMap") ]
+        
+        if directory is not None:
+        
+            paths.append(os.path.join(directory, os.extsep+"MimeMap"))
+        
+        self.create_mimemap(paths)
+    
+    def create_mimemap(self, paths):
+    
+        # Compile a list of paths to check for the MimeMap file.
+        
+        f = None
+        
+        for path in paths:
+        
+            try:
+            
+                f = open(path, "r")
+                break
+            
+            except IOError:
+            
+                # Loop again.
+                pass
+        
+        if f is None:
+        
+            print "Failed to find MimeMap file."
+            lines = []
+        
+        else:
+        
+            lines = f.readlines()
+            f.close()
+        
+        mappings = []
+        
+        # Read the lines found.    
+        for line in lines:
+        
+            # Strip leading and trailing whitespace and split the string.
+            s = string.strip(line)
+            
+            values = []
+            current = ""
+            
+            # Ignore lines beginning with a "#" character.
+            if s[:1] == "#": continue
+            
+            for c in s:
+            
+                if c not in string.whitespace:
+                
+                    current = current + c
+                
+                elif current != "":
+                
+                    values.append(current)
+                    current = ""
+            
+            if current != "":
+            
+                values.append(current)
+            
+            # The values correspond to various fields; the first is the
+            # MIME type/subtype; the second is the RISC OS name; the third
+            # is the hexadecimal value used for the filetype; the rest
+            # are the extensions to recognise:
+            if len(values) > 3:
+            
+                mappings.append(
+                    { "MIME": values[0], "RISC OS name": values[1],
+                      "Hex": values[2], "Extensions": values[3:] }
+                    )
+        
+        # Store the mappings.
+        self.mimemap = mappings
+    
+    # Define dictionaries to use to translate filename.
+    to_riscos = {os.extsep: "/", " ": "\xa0", os.sep: "."}
+    from_riscos = {"/": os.extsep, "\xa0": " ", ".": os.sep}
+    
+    def _filename(self, name, dict):
+    
+        new = []
+        
+        for c in name:
+        
+            if dict.has_key(c):
+            
+                new.append(dict[c])
+            
+            else:
+            
+                new.append(c)
+        
+        return string.join(new, "")
+    
+    def to_riscos_filename(self, name):
+    
+        return self._filename(name, self.to_riscos)
+    
+    def from_riscos_filename(self, name):
+    
+        return self._filename(name, self.from_riscos)
+    
+    def suffix_to_filetype(self, filename):
+    
+        # Find the appropriate filetype to use for the filename given.
+        at = string.rfind(filename, os.extsep)
+        
+        if at == -1:
+        
+            # No suffix: return the default filetype.
+            return DEFAULT_FILETYPE, self.to_riscos_filename(filename)
+        
+        # The suffix includes the "." character. Remove this platform's
+        # separator and replace it with a ".".
+        suffix = "." + filename[at+len(os.extsep):]
+        
+        # Find the suffix in the list of mappings.
+        for mapping in self.mimemap:
+        
+            if suffix in mapping["Extensions"]:
+            
+                # Return the corresponding filetype for this suffix.
+                try:
+                
+                    # Remove the suffix before presenting it to RISC OS.
+                    return string.atoi(mapping["Hex"], 16), \
+                        self.to_riscos_filename(filename)[:at]
+                   
+                except ValueError:
+                
+                    # The value found was not in a valid hexadecimal
+                    # representation. Return the default filetype.
+                    return DEFAULT_FILETYPE, \
+                        self.to_riscos_filename(filename)
+        
+        # No mappings declared the suffix used.
+        return DEFAULT_FILETYPE, self.to_riscos_filename(filename)
+    
+    def filetype_to_suffix(self, filename, filetype):
+    
+        # Find the appropriate filetype to use for the filename given.
+        at = string.rfind(filename, "/")
+        
+        if at != -1:
+        
+            # The suffix includes the "/" character. Replace it with this
+            # platform's separator and ignore the filetype.
+            return self.from_riscos_filename(filename)
+        
+        # Find a choice of suffixes to use in the list of mappings.
+        suffixes = None
+        
+        for mapping in self.mimemap:
+        
+            # Convert the MimeMap entry's filetype to a string.
+            if filetype == string.atoi(mapping["Hex"], 16):
+            
+                # Return the first corresponding suffix.
+                try:
+                
+                    suffixes = mapping["Extensions"]
+                    
+                    if len(suffixes) > 0:
+                    
+                        break
+                
+                except KeyError:
+                
+                    pass
+        
+        if suffixes is not None:
+        
+            # Choose the first available suffix.
+            return self.from_riscos_filename(filename) + \
+                os.extsep + suffixes[0][1:]
+        
+        else:
+        
+            # No mappings declared the filetype used.
+            return self.from_riscos_filename(filename) + DEFAULT_SUFFIX
+    
+    def find_relevant_file(self, path, suffix = None):
+    
+        """find_relevant_file(self, path, suffix = None)
+        
+        Given a path for a file without a suffix from RISC OS, find the
+        relevant file on our machine. This relies on the bodies of the
+        filenames being unique.
+        
+        If a suffix is passed this makes the job much easier.
+        """
+        
+        if suffix is None:
+        
+            suffix = ""
+            
+        paths = [path + suffix, path + DEFAULT_SUFFIX, path + os.extsep + "*"]
+        
+        # Look for a file with any suffix that matches
+        # the path given.
+        
+        path = None
+        
+        for path in paths:
+        
+            files = glob.glob(path)
+            
+            if len(files) == 1:
+            
+                # Unique match
+                return files[0]
+        
+        return None
+    
+    def construct_directory_name(self, elements):
+    
+        built = ""
+        
+        for element in elements:
+        
+            built = os.path.join(built, element)
+        
+        return built
+    
+    def to_riscos_access(self, path = None):
+    
+        """word = to_riscos_access(self, mode = 0777, path = None)
+        
+        Return a word representing the RISC OS access flags roughly
+        equivalent to the read, write and execute flags for a local file,
+        given as an octal number in integer form.
+        
+        If a path is given then its mode is determined and used instead.
+        """
+        
+        if path is not None:
+        
+            mode = os.stat(path)[os.path.stat.ST_MODE]
+        
+        else:
+        
+            mode = self.mode
+        
+        # Owner permissions
+        owner_read = (mode & os.path.stat.S_IRUSR) != 0
+        owner_write = ((mode & os.path.stat.S_IWUSR) != 0) << 1
+        owner_execute = ((mode & os.path.stat.S_IXUSR) != 0) << 2
+        
+        owner = owner_read | owner_write | owner_execute
+        
+        # Ignore group permissions.
+        
+        # Permissions for others
+        others_read = ((mode & os.path.stat.S_IROTH) != 0) << 4
+        others_write = ((mode & os.path.stat.S_IWOTH) != 0) << 5
+        #others_execute = (mode & os.path.stat.S_IXOTH) != 0
+        
+        others = others_read | others_write
+        
+        return owner | others
+    
+    def from_riscos_access(self, word):
+    
+        """mode = from_riscos_access(self, word)
+        
+        Return a mode value representing the read, write and execute flags
+        for a local file, given as an octal number in integer form roughly
+        equivalent to the RISC OS access flags.
+        """
+        
+        # Owner permissions
+        owner_read = ((word & 0x01) != 0) * os.path.stat.S_IRUSR
+        owner_write = ((word & 0x02) != 0) * os.path.stat.S_IWUSR
+        owner_execute = ((word & 0x04) != 0) * os.path.stat.S_IXUSR
+        
+        owner = owner_read | owner_write | owner_execute
+        
+        # Permissions for others
+        others_read = ((word & 0x10) != 0) * os.path.stat.S_IROTH
+        others_write = ((word & 0x20) != 0) * os.path.stat.S_IWOTH
+        
+        others = others_read | others_write
+        
+        # Group permissions
+        group = others
+        
+        return owner | group | others
+    
+    def repr_mode(self, mode):
+    
+        """string = repr_mode(self, mode)
+        
+        Returns a string showing the access permissions for a file, given
+        as an octal number in integer form.
+        """
+        
+        # Use shortcuts to construct a string with as little code as
+        # possible.
+        
+        # Owner permissions
+        ow_r = ["-", "r"][(mode & os.path.stat.S_IRUSR) != 0]
+        ow_w = ["-", "w"][(mode & os.path.stat.S_IWUSR) != 0]
+        ow_e = ["-", "x"][(mode & os.path.stat.S_IXUSR) != 0]
+        
+        owner = ow_r + ow_w + ow_e
+        
+        # Group permissions.
+        g_r = ["-", "r"][(mode & os.path.stat.S_IRGRP) != 0]
+        g_w = ["-", "w"][(mode & os.path.stat.S_IWGRP) != 0]
+        g_e = ["-", "x"][(mode & os.path.stat.S_IXGRP) != 0]
+        
+        group = g_r + g_w + g_e
+        
+        # Permissions for others
+        ot_r = ["-", "r"][(mode & os.path.stat.S_IROTH) != 0]
+        ot_w = ["-", "w"][(mode & os.path.stat.S_IWOTH) != 0]
+        ot_e = ["-", "x"][(mode & os.path.stat.S_IXOTH) != 0]
+        
+        others = ot_r + ot_w + ot_e
+        
+        return owner + group + others
+    
+    def to_riscos_objtype(self, path):
+    
+        if not os.path.exists(path):
+        
+            return 0
+        
+        elif os.path.isfile(path):
+        
+            return 0x0101
+        
+        elif os.path.isdir(path):
+        
+            return 0x2
+        
+        else:
+        
+            return 0
+    
+    def from_riscos_path(self, ros_path):
+    
+        # Construct a path to the object below the shared directory.
+        path = self.from_riscos_filename(ros_path)
+        
+        # Append this path to the shared directory's path.
+        path = os.path.join(self.directory, path)
+        
+        # Look for a suitable file.
+        path = self.find_relevant_file(path)
+        
+        return path
+    
+    def read_path_info(self, path):
+    
+        # Determine the file's relevant filetype and
+        # date words.
+        filetype, date = self.make_riscos_filetype_date(path)
+        
+        # Find the length of the file.
+        if os.path.isdir(path):
+        
+            length = 0x800
+        
+        else:
+        
+            length = os.path.getsize(path)
+        
+        # Construct access attributes for the other client.
+        access_attr = self.to_riscos_access(path = path)
+        
+        # Use a default value for the object type.
+        object_type = self.to_riscos_objtype(path = path)
+        
+        # Use the inode of the file as its handle.
+        handle = os.stat(path)[os.path.stat.ST_INO]# & 0xffffff7f
+        
+        return filetype, date, length, access_attr, object_type, handle
+    
+
+
+class Share(Ports, Translate):
 
     """Share
     
     A class encapsulating a share on a local or remote machine.
     """
     
-    def __init__(self, name, directory, mode, delay, present, filetype, parent):
+    def __init__(self, name, directory, mode, delay, present, filetype,
+                 file_handler):
     
-        # Call the initialisation method of the base class.
+        # Call the initialisation method of the base classes.
         Ports.__init__(self)
+        Translate.__init__(self, directory = directory)
+        
+        # Keep a reference to the parent objects file handler.
+        self.file_handler = file_handler
         
         # Determine the protected flag to broadcast by examining the
         # other users write bit.
@@ -1309,20 +1518,1374 @@ class Share(Ports):
     
     #def notify_share_users(self, 
     
-
-class RemoteShare(Share):
-
-    def __init__(self, host):
+    def open_path(self, ros_path):
     
+        self.log("comment", "Original path: %s" % ros_path, "")
+        
+        # Convert the RISC OS style path to a path within the share.
+        path = self.from_riscos_path(ros_path)
+        
+        if ros_path == "":
+        
+            # Return information about the share itself.
+            cs = self.to_riscos_time()
+            
+            filetype_word, date_word = \
+                self._make_riscos_filetype_date(0xfcd, cs)
+            
+            access_attr = self.to_riscos_access()
+            
+            # Set the filetype to be a share (0xfcd), the date as
+            # the time when the share was added, the length as
+            # a standard value, the access attributes are
+            # converted from the mode value given and the object
+            # type as a standard value.
+            return [ filetype_word, date_word, 0x800, access_attr,
+                     0x102, 0], path
+
+        self.log("comment", "Open path: %s" % path, "")
+        
+        if path is not None and os.path.isdir(path):
+        
+            # A directory
+            
+            filetype, date, length, access_attr, object_type, handle = \
+                self.read_path_info(path)
+            
+            # Keep this handle for possible later use.
+            if not self.file_handler.has_key(handle):
+            
+                self.file_handler[handle] = Directory(path)
+            
+            else:
+            
+                # It may be necessary to report an error that the handle
+                # is in use.
+                pass
+            
+            return [ filetype, date, length, access_attr, object_type,
+                     handle ], path
+        
+        elif path is not None and os.path.isfile(path):
+        
+            # A file
+            
+            filetype, date, length, access_attr, object_type, \
+                handle = self.read_path_info(path)
+            
+            # Keep this handle for possible later use.
+            if not self.file_handler.has_key(handle):
+            
+                self.file_handler[handle] = File(path, self)
+            
+            else:
+            
+                # It may be necessary to report an error that the handle
+                # is in use.
+                fh = self.file_handler[handle]
+                
+                # Use the file object's length, if possible.
+                length = fh.length()
+            
+            return [ filetype, date, length, access_attr, object_type,
+                     handle ], path
+        
+        else:
+        
+            # Reply with an error message.
+            return None, path
+    
+    def create_path(self, ros_path):
+    
+        # Try to open the corresponding file.
+        info, path = self.open_path(ros_path)
+        
+        if ros_path == "":
+        
+            # The share itself is being referenced.
+            return None, path
+        
+        if info is None:
+        
+            # No file exists at this path.
+            try:
+            
+                # Create an object on the local filesystem.
+                path = path + DEFAULT_SUFFIX
+                open(path, "wb").write("")
+                os.chmod(path, self.mode)
+            
+            except IOError:
+            
+                return None, path
+            
+            except OSError:
+            
+                os.remove(path)
+                return None, path
+        
+        else:
+        
+            # A file already exists at this path.
+            try:
+            
+                # Create an object on the local filesystem.
+                open(path, "wb").write("")
+                os.chmod(path, self.mode)
+            
+            except IOError:
+            
+                return None, path
+            
+            except OSError:
+            
+                os.remove(path)
+                return None, path
+        
+        self.log("comment", "Actual path: %s" % path, "")
+        
+        # Try to find the details of the object.
+        
+        if os.path.isdir(path):
+        
+            # A directory
+            
+            filetype, date, length, access_attr, object_type, \
+                handle = self.read_path_info(path)
+            
+            # Keep this handle for possible later use.
+            if not self.file_handler.has_key(handle):
+            
+                self.file_handler[handle] = Directory(path)
+            
+            return [ filetype, date, length, access_attr, object_type,
+                     handle ], path
+        
+        elif os.path.isfile(path):
+        
+            # A file
+            
+            filetype, date, length, access_attr, object_type, \
+                handle = self.read_path_info(path)
+            
+            # Keep this handle for possible later use.
+            if not self.file_handler.has_key(handle):
+            
+                self.file_handler[handle] = File(path, self)
+            
+            else:
+            
+                # It may be necessary to report an error that the handle
+                # is in use.
+                fh = self.file_handler[handle]
+                
+                # Use the file object's length, if possible.
+                length = fh.length()
+            
+            return [ 0xdeaddead, 0xdeaddead, length, 0x33, object_type,
+                     handle ], path
+        
+        else:
+        
+            # Reply with an error message.
+            return None, path
+    
+    def delete_path(self, ros_path):
+    
+        # Convert the RISC OS style path to a path within the share.
+        path = self.from_riscos_path(ros_path)
+        
+        if ros_path == "":
+        
+            # The share itself is being referenced.
+            return None, path
+        
+        self.log("comment", "Delete request: %s" % path, "")
+        
+        # Construct access attributes for the other client.
+        access_attr = self.to_riscos_access(path = path)
+        
+        object_type = self.to_riscos_objtype(path)
+        
+        try:
+        
+            os.remove(path)
+            return [ 0xdeaddead, 0xdeaddead, 0x00000000, access_attr,
+                     object_type ], path
+        
+        except OSError:
+        
+            return None, path
+    
+    def set_access_attr(self, ros_path, access_attr):
+    
+        # Convert the RISC OS style path to a path within the share.
+        path = self.from_riscos_path(ros_path)
+        
+        if ros_path == "":
+        
+            # The share itself is being referenced.
+            return None, path
+        
+        # Convert the RISC OS attributes to a mode value.
+        mode = self.from_riscos_access(access_attr)
+        
+        # Try to change the permissions on the object.
+        try:
+        
+            os.chmod(path, mode)
+            
+            # Construct the new details for the object.
+            filetype, date, length, access_attr, object_type, \
+                handle = self.read_path_info(path)
+            
+            return [filetype, date, length, access_attr, object_type], path
+        
+        except OSError:
+        
+            return None, path
+    
+    def rename_path(self, ros_path):
+    
+        # Try to open the corresponding file.
+        info, path = self.open_path(ros_path)
+        
+        if ros_path == "":
+        
+            # The share itself is being referenced.
+            return None, path
+        
+        return info, path
+    
+    def set_filetype(self, fh):
+    
+        # Convert the file's path to a RISC OS style filetype and path.
+        filetype, ros_path = self.suffix_to_filetype(fh.path)
+        
+        # Find the filetype and date from the words given.
+        filetype, date = \
+            self.take_riscos_filetype_date(filetype_word, date_word)
+        
+        # Determine the correct suffix to use for the file.
+        new_path = self.filetype_to_suffix(ros_path, filetype)
+        
+        self.log("comment", "Renaming %s to %s" % (fh.path, new_path), "")
+        
+        if fh.path != new_path:
+        
+            try:
+            
+                # Try to rename the object.
+                os.rename(fh.path, new_path)
+            
+            except OSError:
+            
+                return None
+        
+        # Construct the new details for the object.
+        filetype, date, length, access_attr, object_type, \
+            handle = self.read_path_info(new_path)
+        
+        # Keep the length from the original file.
+        length = fh.length()
+        
+        fh.path = new_path
+        
+        return [filetype, date, length, access_attr, object_type, handle]
+    
+    def catalogue_path(self, ros_path):
+    
+        # Convert the RISC OS style path to a path within the share.
+        path = self.from_riscos_path(ros_path)
+        
+        if not os.path.isdir(path):
+        
+            # The path given did not refer to a directory.
+            return None, "Not a directory", path
+        
+        try:
+        
+            # For unprotected shares, return a catalogue to the client.
+            
+            files = os.listdir(path)
+        
+        except OSError:
+        
+            return None, "Not found", path
+        
+        # Write the catalogue information.
+        
+        info = []
+        
+        # The first word is the length of the directory structure
+        # information.
+        # Calculate this later.
+        info.append(0)
+        
+        # The next word is the length of the following share
+        # information.
+        info.append(0x24)
+        
+        dir_length = 0
+        
+        n_files = 0
+        
+        for file in files:
+        
+            # Omit files which begin with a suffix separator ("." on
+            # Linux, for example).
+            if string.find(file, os.extsep) == 0:
+            
+                continue
+            
+            file_info = []
+            length = 0
+            
+            # Construct the path to the file.
+            this_path = os.path.join(path, file)
+            
+            try:
+            
+                # Filetype word
+                filetype, filename = self.suffix_to_filetype(file)
+                
+                # Construct the filetype and date words.
+                
+                # The number of seconds since the last modification
+                # to the file is read.
+                seconds = os.stat(this_path)[os.path.stat.ST_MTIME]
+                
+                # Convert this to the RISC OS date format.
+                cs = self.to_riscos_time(seconds = seconds)
+                
+                filetype_word = \
+                    0xfff00000 | (filetype << 8) | \
+                    ((cs & 0xff00000000) >> 32)
+                
+                file_info.append(filetype_word)
+                
+                length = length + 4
+                
+                # Date word
+                file_info.append(cs & 0xffffffff)
+                length = length + 4
+                
+                # Length word (0x800 for directory)
+                if os.path.isdir(this_path):
+                
+                    file_info.append(0x800)
+                
+                else:
+                
+                    file_info.append(os.path.getsize(this_path))
+                
+                length = length + 4
+                
+                # Access attributes
+                file_info.append(self.to_riscos_access(path = this_path))
+                
+                length = length + 4
+                
+                # Object type (0x2 for directory)
+                if os.path.isdir(this_path):
+                
+                    file_info.append(0x02)
+                
+                else:
+                
+                    file_info.append(0x01)
+                
+                length = length + 4
+                
+                # Convert the name into a form suitable for the
+                # other client.
+                #file_name = self.to_riscos_filename(file)
+                
+                # Zero terminated name string
+                name_string = self._encode([filename + "\x00"])
+                
+                file_info.append(name_string)
+                
+                length = length + len(name_string)
+                
+                n_files = n_files + 1
+            
+            except OSError:
+            
+                file_info = []
+                length = 0
+            
+            info = info + file_info
+            dir_length = dir_length + length
+        
+        # The data following the directory structure is concerned
+        # with the share and is like a return value from a share
+        # open request but with a "B" command word like a
+        # catalogue request.
+        
+        # Use the inode of the directory as its handle.
+        handle = os.stat(path)[os.path.stat.ST_INO] & 0xffffffff
+        
+        share_value = (handle & 0xffffff00) ^ 0xffffff02
+        
+        trailer = \
+        [
+            0xffffcd00,  0x00000000, 0x00000800,
+            0x00000013, # Read only for others (0x10); read write for owner
+            share_value, # common value for directories in this share
+            handle, # handle of object as with info returned for opening
+            dir_length, # number of words used to describe the directory
+                        # contents
+            0xffffffff
+        ]
+        
+        # Fill in the directory length.
+        info[0] = dir_length
+        
+        # Return the lists used to construct the message and the path
+        # catalogued.
+        return info, trailer, path
+    
+    def send_file(self, fh, pos, length):
+    
+        # Determine the length of the file.
+        file_length = fh.length()
+        
+        # Determine the amount of information we can send.
+        amount = min(length, SEND_GET_SIZE)
+        
+        # Find the relevant part of the file.
+        fh.seek(pos, 0)
+        
+        # Read the amount of data required.
+        file_data = fh.read(amount)
+        
+        # Calculate the new offset into the file.
+        new_pos = pos + len(file_data)
+        
+        # Write the message header.
+        header = [len(file_data), 0xc]
+        
+        self.log("comment", "Wrote return header: %s" % header, "")
+        
+        # Encode the header, adding padding if necessary.
+        header = self._encode(header)
+        
+        self.log("comment", "Wrote %i bytes of data" % len(file_data), "")
+        
+        # Add a 12 byte trailer onto the end of the data
+        # containing the amount of data sent and the new
+        # offset into the file being read.
+        trailer = [len(file_data), new_pos]
+        
+        self.log("comment", "Wrote return trailer: %s" % trailer, "")
+        
+        # Encode the trailer, adding padding if necessary.
+        trailer = self._encode(trailer)
+        
+        # Construct the information string.
+        info = header + file_data
+        
+        return info, trailer, new_pos
+    
+    
+
+
+class RemoteShare(Ports, Translate):
+
+    def __init__(self, name, host, messages):
+    
+        Ports.__init__(self)
+        Translate.__init__(self)
+        
+        self.name = name
         self.host = host
+        
+        # Keep a reference to the messages object passed by the Peer.
+        self.messages = messages
+    
+    def _read_file_info(self, data):
+    
+        # Read the information on the object.
+        filetype_word = self.str2num(4, data[4:8])
+        filetype = (filetype_word & 0xfff00) >> 8
+        date_str = hex(self.str2num(4, data[4:8]))[-2:] + \
+                hex(self.str2num(4, data[8:12]))[2:]
+        
+        date = self.from_riscos_time(long(date_str, 16))
+        
+        length = self.str2num(4, data[12:16])
+        access_attr = self.str2num(4, data[16:20])
+        object_type = self.str2num(4, data[20:24])
+        
+        info = { "filetype": filetype, "date": date,
+                 "length": length,
+                 "access": access_attr, "type": object_type,
+                 "isdir": (object_type == 0x2) }
+        
+        if len(data) > 24:
+        
+            handle = self.str2num(4, data[24:28])
+            
+            info["handle"] = handle
+        
+        return info
+    
+    def open(self, name):
+    
+        """open(self, name)
+        
+        Open a resource of a given name in the share.
+        """
+        
+        msg = ["A", 1, 0, name+"\x00"]
+        
+        # Send the request.
+        replied, data = self._send_request(msg, self.host, ["R"])
+        
+        if replied != 1:
+        
+            return None
+        
+        else:
+        
+            print 'Successfully opened "%s"' % name
+        
+        # Return the information on the item.
+        return self._read_file_info(data)
+    
+    def catalogue(self, name):
+    
+        """lines = catalogue(self, name)
+        
+        Return a catalogue of the files in the named share.
+        """
+        
+        msg = ["B", 3, 0xffffffff, 0, name+"\x00"]
+        
+        # Send the request.
+        replied, data = self._send_request(msg, self.host, ["S"])
+        
+        if replied != 1:
+        
+            return
+        
+        # Read the catalogue information.
+        c = 4
+        
+        # The first word is the length of the directory structure in bytes
+        # beginning with the next word.
+        dir_length = self.str2num(4, data[c:c+4])
+        c = c + 4
+        
+        start = c
+        
+        # The next word is the directory name.
+        c = c + 4
+        
+        lines = []
+        files = []
+        
+        while c < (start + dir_length):
+        
+            # Filetype word
+            filetype_word = self.str2num(4, data[c:c+4])
+            filetype = (filetype_word & 0xfff00) >> 8
+            c = c + 4
+            
+            # Unknown word
+            date_str = hex(filetype_word)[-2:] + \
+                hex(self.str2num(4, data[c:c+4]))[2:]
+            
+            date = self.from_riscos_time(long(date_str, 16))
+            
+            c = c + 4
+            
+            # Length word (0x800 for directory)
+            length = self.str2num(4, data[c:c+4])
+            c = c + 4
+            
+            # Access attributes
+            access_attr = self.str2num(4, data[c:c+4])
+            c = c + 4
+            
+            # Object type (0x2 for directory)
+            object_type = self.str2num(4, data[c:c+4])
+            c = c + 4
+            
+            # Zero terminated name string
+            name = self.read_string(
+                data, offset = c, ending = "\000", include = 0
+                )
+            
+            c = c + len(name) + 1
+            
+            if c % 4 != 0:
+            
+                c = c + 4 - (c % 4)
+            
+            files.append( (
+                filetype_word, date, length, access_attr, object_type, name
+                ) )
+            
+            lines.append(
+                "%s\t:\t%03x\t(%i bytes)\t%s\t%i\t%s" % (
+                    name, filetype, length,
+                    self.repr_mode(self.from_riscos_access(access_attr)),
+                    object_type,
+                    time.asctime(date)
+                    )
+                )
+        
+        for line in lines:
+        
+            print string.expandtabs(line, 4)
+        
+        # The data following the directory structure is concerned
+        # with the share and is like a return value from a share
+        # open request but with a "B" command word like a
+        # catalogue request.
+        
+        # Return the catalogue information.
+        return files
+    
+    cat = catalogue
+    
+    def get(self, name):
+    
+        # Read the object's information.
+        info = self.open(name)
+        
+        if info is None:
+        
+            return
+        
+        # Use the file handle obtained from the information retrieved about
+        # this object.
+        handle = info["handle"]
+        
+        file_data = []
+        pos = 0
+        
+        # Request packets smaller than the receive buffer size.
+        packet_size = RECV_GET_SIZE
+        
+        while pos < info["length"]:
+        
+            msg = ["B", 0xb, handle, pos, packet_size]
+            
+            # Send the request.
+            replied, data = self._send_request(msg, self.host, ["S"])
+            
+            if replied != 1:
+            
+                print "The machine containing the shared disc does not respond"
+                return
+            
+            # Read the header.
+            length = self.str2num(4, data[4:8])
+            trailer_length = self.str2num(4, data[8:12])
+            
+            file_data.append(data[12:12+length])
+            
+            #print length, trailer_length, len(data)
+            
+            pos = pos + length
+            
+            if len(data[12+length:]) == trailer_length:
+            
+                returned = self.str2num(4, data[12+length+4:12+length+8])
+                new_pos = self.str2num(4, data[12+length+8:12+length+12])
+                
+                # We have found the packet's trailer.
+                sys.stdout.write(
+                    "\rRead %i/%i bytes of file %s" % (
+                        new_pos, info["length"], name
+                        )
+                    )
+                sys.stdout.flush()
+        
+        
+        # Ensure that the whole file has been read.
+        msg = ["B", 0xb, handle, info["length"], 0]
+        replied, data = self._send_request(msg, self.host, ["S"])
+        
+        if replied != 1:
+        
+            return None
+        
+        else:
+        
+            length = self.str2num(4, data[4:8])
+            trailer_length = self.str2num(4, data[8:12])
+            
+            if len(data[12+length:]) == trailer_length:
+            
+                returned = self.str2num(4, data[12+length+4:12+length+8])
+                new_pos = self.str2num(4, data[12+length+8:12+length+12])
+                
+                # We have found the packet's trailer.
+                sys.stdout.write(
+                    "\rFile %s (%i bytes) read successfully" % (
+                        name, new_pos
+                        )
+                    )
+                sys.stdout.flush()
+        
+        # Close the resource.
+        self._close(handle)
+        
+        return string.join(file_data, "")
+    
+    def pget(self, name):
+    
+        # Read the object's information.
+        info = self.open(name)
+        
+        if info is None:
+        
+            return
+        
+        # Use the file handle obtained from the information retrieved about
+        # this object.
+        handle = info["handle"]
+        
+        file_data = []
+        pos = 0
+        
+        # Request packets smaller than the receive buffer size.
+        packet_size = RECV_GET_SIZE
+        
+        start_addr = 0
+        
+        while start_addr < info["length"]:
+        
+            next_addr = min(start_addr + packet_size, info["length"])
+            
+            msg = ["A", 0xb, handle, start_addr, next_addr - start_addr]
+            
+            # Send the request.
+            replied, data = self._send_request(msg, self.host, ["D"])
+            
+            reply_id = data[1:4]
+            
+            if replied != 1:
+            
+                print "The machine containing the shared disc does not respond"
+                return
+            
+            from_addr = start_addr
+            
+            while 1:
+            
+                # Read the header.
+                if data[0] == "D" and len(data) > 8:
+                
+                    from_addr = self.str2num(4, data[4:8]) + start_addr
+                    
+                    file_data.append(data[8:])
+                    
+                    from_addr = from_addr + len(data) - 8
+                
+                elif data[0] == "D":
+                
+                    data_pos = self.str2num(4, data[4:8]) + start_addr
+                    
+                    if data_pos == next_addr:
+                    
+                        break
+                
+                elif data[0] == "R" and from_addr == next_addr:
+                
+                    break
+                
+                msg = ["r", from_addr - start_addr, next_addr - start_addr]
+                
+                # Send the request.
+                replied, data = self._send_request(
+                    msg, self.host, ["D", "R"], new_id = reply_id
+                    )
+                
+                if replied != 1:
+                
+                    print "The machine containing the shared disc does not respond"
+                    return
+            
+            sys.stdout.write(
+                "\rRead %i/%i bytes of file %s" % (
+                    from_addr, info["length"], name
+                    )
+                )
+            sys.stdout.flush()
+            
+            # Increase the start position.
+            start_addr = next_addr
+        
+        sys.stdout.write(
+            "\rFile %s (%i bytes) read successfully" % (
+                name, info["length"]
+                )
+            )
+        sys.stdout.flush()
+        
+        # Close the resource.
+        self._close(handle)
+        
+        return string.join(file_data, "")
+    
+    def _close(self, handle):
+    
+        #if handle is None:
+        #
+        #    # Read the object's information.
+        #    info = self.open(name, host)
+        #    
+        #    if info is None:
+        #    
+        #        return
+        #    
+        #    # Use the file handle obtained from the information retrieved about
+        #    # this object to close the resource.
+        #    handle = info["handle"]
+        
+        msg = ["A", 0xa, handle]
+        replied, data = self._send_request(msg, self.host, ["R"])
+        
+        if replied != 1:
+        
+            return None
+    
+    def put(self, path, name):
+    
+        # Use the non-broadcast socket.
+        if not self.ports.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return 0, []
+        
+        s = self.ports[49171]
+        
+        try:
+        
+            # Determine the file's relevant filetype and
+            # date words.
+            filetype_word, date_word = self.make_riscos_filetype_date(path)
+            
+            # Find the length of the file.
+            length = os.path.getsize(path)
+            
+            # Construct access attributes for the other client.
+            access_attr = self.to_riscos_access(path = path)
+            
+            # Use a default value for the object type.
+            object_type = 0x0101
+        
+        except OSError:
+        
+            print "Failed to find file: %s" % path
+            return
+        
+        # Convert the filename into a RISC OS filename on the share.
+        directory, file = os.path.split(path)
+        
+        self.log("comment", "File to put: %s" % file, "")
+        
+        filetype, ros_file = self.suffix_to_filetype(file)
+        
+        self.log("comment", "Remote file: %s" % ros_file, "")
+        
+        # Join the path with the share name to obtain a share-relative
+        # path.
+        ros_path = name + "." + ros_file
+        
+        self.log("comment", "Remote path: %s" % ros_path, "")
+        
+        # Create a file on the remote server.
+        msg = ["A", 0x4, 0, ros_path+"\x00"]
+        
+        # Send the request.
+        replied, data = self._send_request(msg, self.host, ["R"])
+        
+        if replied != 1:
+        
+            return
+        
+        # The data returned represents the information about the newly
+        # created remote file.
+        info = self._read_file_info(data)
+        
+        if info is None or not info.has_key("handle"):
+        
+            print "Cannot send file to client."
+            return
+        
+        # Send the file, from the start to  its length.
+        msg = ["A", 0xc, info["handle"], 0, length]
+        
+        # Send the request.
+        replied, data = self._send_request(msg, self.host, ["w"])
+        
+        if replied != 1:
+        
+            # Tidy up.
+            self._close(info["handle"])
+            
+            self.delete(ros_path)
+            return
+        
+        # A reply containing two words was returned. Presumably, the
+        # second is the length of the data to be sent and the first is
+        # the position in the file of the data requested (like the
+        # get method's "B" ... 0xb message.
+        reply_id = data[1:4]
+        from_addr = self.str2num(4, data[4:8])
+        to_addr = self.str2num(4, data[12:16])
+        amount = min(SEND_SIZE, to_addr - from_addr)
+        
+        try:
+        
+            f = open(path, "rb")
+            
+            while from_addr < length:
+            
+                f.seek(from_addr, 0)
+                
+                # Send a message with the offset of that data within the
+                # file.
+                msg = ["d"+reply_id, from_addr]
+                
+                # Read the data to be sent.
+                file_data = f.read(amount)
+                
+                # Don't pad the data sent.
+                msg = self._encode(msg) + file_data
+                self.log(
+                    "comment",
+                    "%i bytes of data sent in message." % len(file_data),
+                    ""
+                    )
+                
+                # Send the reply as a string.
+                s.sendto(msg, (self.host, 49171))
+                
+                # Wait for messages to arrive with the same ID as
+                # the one used to specify the file to be uploaded.
+                replied, data = self._expect_reply(
+                    s, msg, self.host, reply_id, ["w", "R"]
+                    )
+                
+                if replied != 1:
+                
+                    # Tidy up.
+                    self._close(info["handle"])
+                    
+                    self.delete(ros_path)
+                    
+                    f.close()
+                    
+                    print "Uploading was terminated."
+                    return
+                
+                #pos = pos + amount
+                if data[0] == "w":
+                
+                    # More data requested.
+                    reply_id = data[1:4]
+                    from_addr = self.str2num(4, data[4:8])
+                    to_addr = self.str2num(4, data[12:16])
+                    amount = min(SEND_SIZE, to_addr - from_addr)
+                
+                elif data[0] == "R":
+                
+                    from_addr = self.str2num(4, data[4:8])
+                    total_length = self.str2num(4, data[8:12])
+                    break
+                
+                sys.stdout.write(
+                    "\rWritten %i/%i bytes of file %s" % (
+                        from_addr, length, ros_path
+                        )
+                    )
+                sys.stdout.flush()
+            
+            # Remove all relevant messages from the message list.
+            messages = self.messages._all_messages(["w", "R"], reply_id)
+            
+            print "Discarded messages."
+            for msg in messages:
+            
+                for line in self.interpret(msg):
+                
+                    print line
+                print
+            
+            # When all the data has been sent, send an empty "d" message.
+            msg = ["d"+reply_id, length]
+            
+            self._send_list(msg, s, (self.host, 49171))
+            
+            sys.stdout.write(
+                '\rFile "%s" (%i bytes) successfully written to "%s"' % (
+                    path, length, ros_path
+                    )
+                )
+            sys.stdout.flush()
+        
+        except IOError:
+        
+            # Tidy up.
+            self._close(info["handle"])
+            
+            self.delete(ros_path)
+            
+            print "Uploading was terminated."
+            return
+        
+        # Set the filetype and date stamp.
+        msg = [ "A", 0x10, info["handle"], filetype_word, date_word ]
+        
+        # Send the request.
+        replied, data = self._send_request(msg, self.host, ["R"])
+        
+        if replied != 1:
+        
+            # Tidy up.
+            self._close(info["handle"])
+            
+            self.delete(ros_path)
+            return
+        
+        # Tidy up.
+        self._close(info["handle"])
+    
+    def pput(self, path, name):
+    
+        # Use the non-broadcast socket.
+        if not self.ports.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return 0, []
+        
+        s = self.ports[49171]
+        
+        try:
+        
+            # Determine the file's relevant filetype and
+            # date words.
+            filetype_word, date_word = self.make_riscos_filetype_date(path)
+            
+            # Find the length of the file.
+            length = os.path.getsize(path)
+            
+            # Construct access attributes for the other client.
+            access_attr = self.to_riscos_access(path = path)
+            
+            # Use a default value for the object type.
+            object_type = 0x0101
+        
+        except OSError:
+        
+            print "Failed to find file: %s" % path
+            return
+        
+        # Convert the filename into a RISC OS filename on the share.
+        directory, file = os.path.split(path)
+        
+        self.log("comment", "File to put: %s" % file, "")
+        
+        filetype, ros_file = self.suffix_to_filetype(file)
+        
+        self.log("comment", "Remote file: %s" % ros_file, "")
+        
+        # Join the path with the share name to obtain a share-relative
+        # path.
+        ros_path = name + "." + ros_file
+        
+        self.log("comment", "Remote path: %s" % ros_path, "")
+        
+        # Create a file on the remote server.
+        msg = ["A", 0x4, 0, ros_path+"\x00"]
+        
+        # Send the request.
+        replied, data = self._send_request(msg, self.host, ["R"])
+        
+        if replied != 1:
+        
+            return
+        
+        # The data returned represents the information about the newly
+        # created remote file.
+        info = self._read_file_info(data)
+        
+        if info is None or not info.has_key("handle"):
+        
+            print "Cannot send file to client."
+            return
+        
+        try:
+        
+            f = open(path, "rb")
+            
+            start_addr = 0
+            
+            while start_addr < length:
+            
+                # Send the file, from the start to  its length.
+                next_addr = min(length, start_addr + SEND_PPUT_SIZE)
+                
+                # Send the start offset into the file and the amount of data
+                # to be transferred.
+                msg = [ "A", 0xc, info["handle"], start_addr,
+                        next_addr - start_addr ]
+                
+                # Send the request.
+                replied, data = self._send_request(msg, self.host, ["w"])
+                
+                if replied != 1:
+                
+                    # Tidy up.
+                    self._close(info["handle"])
+                    
+                    self.delete(ros_path)
+                    return
+                
+                # A reply containing two words was returned. These are the
+                # start and end offsets into the file relative to the
+                # start offset we gave previously.
+                
+                from_addr = start_addr
+                
+                while 1:
+                
+                    if data[0] == "w":
+                    
+                        # More data requested.
+                        reply_id = data[1:4]
+                        
+                        # Convert the relative addresses into absolute ones.
+                        from_addr = start_addr + self.str2num(4, data[4:8])
+                        
+                        to_addr = start_addr + \
+                            min(self.str2num(4, data[12:16]), next_addr)
+                            
+                        amount = min(SEND_SIZE, to_addr - from_addr)
+                    
+                    elif data[0] == "R":
+                    
+                        # Convert the relative addresses into absolute ones.
+                        from_addr = start_addr + self.str2num(4, data[4:8])
+                        #total_length = start_addr + self.str2num(4, data[8:12])
+                        break
+                    
+                    f.seek(from_addr, 0)
+                    
+                    # Send a message with the offset of that data within the
+                    # file. The address sent is relative to the start of the
+                    # block specified.
+                    msg = ["d"+reply_id, from_addr - start_addr]
+                    
+                    # Read the data to be sent.
+                    file_data = f.read(amount)
+                    
+                    # Don't pad the data sent.
+                    msg = self._encode(msg) + file_data
+                    self.log(
+                        "comment",
+                        "%i bytes of data sent in message." % len(file_data),
+                        ""
+                        )
+                    
+                    # Send the reply as a string.
+                    s.sendto(msg, (self.host, 49171))
+                    
+                    # Send a message with the amount of data specified.
+                    # The address sent is relative to the start of the
+                    # block specified.
+                    msg = ["d", from_addr - start_addr]
+    
+                    # Wait for messages to arrive with the same ID as
+                    # the one used to specify the file to be uploaded.
+                    replied, data = self._send_request(
+                        msg, self.host, ["w", "R"], new_id = reply_id
+                        )
+                    
+                    if replied != 1:
+                    
+                        # Tidy up.
+                        self._close(info["handle"])
+                        
+                        self.delete(ros_path)
+                        
+                        f.close()
+                        
+                        print "Uploading was terminated."
+                        return
+                
+                #pos = pos + amount
+                sys.stdout.write(
+                    "\rWritten %i/%i bytes of file %s" % (
+                        from_addr, length, ros_path
+                        )
+                    )
+                sys.stdout.flush()
+                
+                # Increase the start position.
+                start_addr = next_addr
+            
+            # Remove all relevant messages from the message list.
+            messages = self.messages._all_messages(["w", "R"], reply_id)
+            
+            print "Discarded messages."
+            for msg in messages:
+            
+                for line in self.interpret(msg):
+                
+                    print line
+                print
+            
+            # When all the data has been sent, send an empty "d" message.
+            msg = ["d"+reply_id, length]
+            
+            self._send_list(msg, s, (self.host, 49171))
+            
+            sys.stdout.write(
+                '\rFile "%s" (%i bytes) successfully written to "%s"' % (
+                    path, length, ros_path
+                    )
+                )
+            sys.stdout.flush()
+        
+        except IOError:
+        
+            # Tidy up.
+            self._close(info["handle"])
+            
+            self.delete(ros_path)
+            
+            print "Uploading was terminated."
+            return
+        
+        # Set the filetype and date stamp.
+        msg = [ "A", 0x10, info["handle"], filetype_word, date_word ]
+        
+        # Send the request.
+        replied, data = self._send_request(msg, self.host, ["R"])
+        
+        if replied != 1:
+        
+            # Tidy up.
+            self._close(info["handle"])
+            
+            self.delete(ros_path)
+            return
+        
+#        # Set the file's length.
+#        msg = ["A", 0xf, info["handle"], length]
+#        
+#        # Send the request.
+#        replied, data = self._send_request(msg, host, ["R"])
+#        
+#        if replied != 1:
+#        
+#            # Tidy up.
+#            self._close(info["handle"], host)
+#            
+#            self.delete(ros_path, host)
+#            return
+#        
+#        # Examine the message queue, looking for "D" messages.
+#        reply_id = data[1:4]
+#        
+#        found = 1
+#        while 1:
+#        
+#            r, d = self.messages._scan_messages(["D"], reply_id)
+#            
+#            if r == 1:
+#                found = 1
+#            else:
+#                break
+        
+        #return msg
+        
+        # Tidy up.
+        self._close(info["handle"])
+    
+    def delete(self, name):
+    
+        """delete(self, name)
+        
+        Delete the named file on the specified host.
+        """
+        
+        msg = ["A", 0x6, 0, name + "\x00"]
+        
+        replied, data = self._send_request(msg, self.host, ["R"])
+        
+        if replied == 1:
+        
+            sys.stdout.write("Deleted %s on %s" % (name, self.host))
+            sys.stdout.flush()
+    
+    def rename(self, name1, name2):
+    
+        msg = ["A", 0x9, 0x10, 0, name1 + "\x00"]
+        
+        replied, data = self._send_request(msg, self.host, ["R"])
+        
+        if replied != 1:
+        
+            return
+        
+        # The data returned represents the information about the file.
+        info = self._read_file_info(data)
+        
+        
+    
+    def setmode(self, name, mode):
+    
+        access_attr = self.to_riscos_access(mode)
+        
+        msg = ["A", 0x7, access_attr, 0, name+"\x00"]
+        
+        replied, data = self._send_request(msg, self.host, ["R"])
+        
+        if replied != 1:
+        
+            return
+        
+        # Read the information returned.
+        info = self._read_file_info(data)
+        
+        return info
+    
+    def settype(self, name, filetype):
+    
+        # Obtain information on the file (open it).
+        info = self.open(name)
+        
+        cs = self.to_riscos_time(ttuple = info["date"])
+        
+        filetype_word, date_word = \
+            self._make_riscos_filetype_date(filetype, cs)
+        
+        msg = ["A", 0x10, info["handle"], filetype_word, date_word]
+        
+        replied, data = self._send_request(msg, self.host, ["R"])
+        
+        if replied != 1:
+        
+            return
+        
+        self._close(info["handle"])
+    
 
 
-
-class Peer(Common, Ports):
+class Peer(Ports):
 
     def __init__(self, debug = 1):
     
-        # Call the initialisation method of the base class.
+        # Call the initialisation method of the base classes.
         Ports.__init__(self)
         
         self.debug = 1
@@ -1372,7 +2935,16 @@ class Peer(Common, Ports):
         self.transfer_events = {}
         
         # Create lists of messages sent to each listening socket.
-        self.share_messages = []
+        
+        # General messages.
+        self.general_messages = Messages()
+        
+        # Messages about shares.
+        self.share_messages = Messages()
+        
+        # Use an object to manage the file handles used by shares owned by
+        # this Peer.
+        self.file_handler = Files()
         
         # Maintain a dictionary of open shares, on the local host or
         # on other hosts.
@@ -1380,17 +2952,6 @@ class Peer(Common, Ports):
         # the name of the share and the host it resides on and contains the
         # ID value used to open it.
         self.open_shares = {}
-        
-        # Keep a dictionary of local file handles in use but limit its length.
-        self.max_handles = 100
-        self.handles = {}
-        
-        # ---------------------------------------------------------------------
-        # Read configuration files
-        
-        # Read the MimeMap file. This method is defined in the Common class
-        # definition.
-        self.create_mimemap()
         
         # Start serving.
         self.serve()
@@ -1413,6 +2974,125 @@ class Peer(Common, Ports):
         
             print "Closing socket for port %i" % port
             _socket.close()
+    
+    def create_shares(self):
+    
+        # Compile a list of paths to check for the access.cfg file.
+        paths = [""]
+        
+        # Look for a file in the path used to invoke this program.
+        path, file = os.path.split(sys.argv[0])
+        paths.append(path)
+        
+        f = None
+        
+        for path in paths:
+        
+            try:
+            
+                f = open(os.path.join(path, "access.cfg"), "r")
+                break
+            
+            except IOError:
+            
+                # Loop again.
+                pass
+        
+        if f is None:
+        
+            print "Failed to find access.cfg file."
+            lines = []
+        
+        else:
+        
+            lines = f.readlines()
+            f.close()
+        
+        # Read the lines found.
+        for line in lines:
+        
+            # Strip leading and trailing whitespace.
+            s = string.strip(line)
+            
+            values = []
+            current = ""
+            
+            # Ignore lines beginning with a "#" character.
+            if s[:1] == "#": continue
+            
+            for c in s:
+            
+                if c not in string.whitespace:
+                
+                    current = current + c
+                
+                elif current != "":
+                
+                    values.append(current)
+                    current = ""
+            
+            if current != "":
+            
+                values.append(current)
+            
+            # The values correspond to various fields corresponding to the
+            # following syntax:
+            #
+            # <share> <path> <mode> <delay> <translation> <filetype>
+            #
+            # The "share" parameter is the name by which other clients
+            # refer to the contents of the shared directory.
+            #
+            # The "path" is the path on the local filesystem which can be
+            # navigated by other clients.
+            #
+            # The "mode" is an octal value describing a mask to apply to
+            # the files and directories in the shared directory. This
+            # is loosely translated into a value for the protected flag
+            # which is understood by RISC OS clients.
+            #
+            # The "delay" parameter sets the delay between availability
+            # broadcasts on the network. This can be disabled by supplying
+            # the value "off" (without quotes) or set to the default value
+            # using the value "default".
+            #
+            # The "translation" parameter is either "suffix" or "truncate"
+            # indicating that filename suffixes are either to be presented
+            # to other clients or truncated.
+            #
+            # A final parameter is the default filetype to be used for
+            # files whose type cannot be determined using the MimeMap
+            # file. This should take the form of a twelve bit integer in
+            # Python or C hexadecimal form, e.g. 0xfff.
+            #
+            # myshare /home/user/myfile 0644 off truncate 0xffd
+            
+            if len(values) == 6:
+            
+                # Try to create this share.
+                name, path, mode, delay, present, filetype = values[0:6]
+                
+                self.add_share(name, path, mode, delay, present, filetype)
+                
+            elif len(values) > 0:
+            
+                sys.stderr.write(
+                    "Bad or incomplete share description: %s\n" % line
+                    )
+    
+    def read_share_path(self, _string):
+    
+        path = self.read_string(
+            _string, ending = "\x00", include = 0
+            )
+        
+        # Split the path up into elements.
+        path_elements = string.split(path, ".")
+        
+        # The first element is the share name.
+        share_name = path_elements[0]
+        
+        return share_name, string.join(path_elements[1:], ".")
     
     def broadcast_startup(self):
     
@@ -1622,7 +3302,7 @@ class Peer(Common, Ports):
     
     # Method used in thread for transferring files
     
-    def transfer_file(self, event, reply_id, start, amount, fh, _socket,
+    def receive_file(self, event, reply_id, start, amount, fh, _socket,
                       address):
     
         # This method should only get called once by the thread it belongs
@@ -1740,11 +3420,10 @@ class Peer(Common, Ports):
         
         # Send a reply message to indicate that the transfer has finished.
         msg = ["R"+reply_id, start, pos]
-        self.log("sent", msg, address)
         self._send_list(msg, _socket, address)
         
         # Remove all relevant messages from the message list.
-        messages = self._all_messages(["d"], reply_id)
+        messages = self.messages._all_messages(["d"], reply_id)
         
         self.log("comment", "Discarded messages:", "")
         for msg in messages:
@@ -1754,6 +3433,95 @@ class Peer(Common, Ports):
                 self.log("comment", line, "")
             
             self.log("comment", "", "")
+    
+    def send_file(self, event, reply_id, start, length, fh, _socket,
+                  address):
+    
+        # This method should only get called once by the thread it belongs
+        # to, then the thread should terminate.
+        
+        pos = start
+        
+        end = start + length
+        
+        # Determine the amount of information we can send.
+        amount = min(length, SEND_GET_SIZE)
+        
+        self.log("comment", "Position: %i" % pos, "")
+        self.log("comment", "Expected amount of data: %i" % amount, "")
+        self.log("comment", "End at: %i" % end, "")
+        
+        # Read the host name from the address tuple.
+        host = address[0]
+        
+        # Determine the length of the file.
+        file_length = fh.length()
+        
+        while pos < end:
+        
+            # Find the relevant part of the file.
+            fh.seek(pos, 0)
+            
+            # Read the amount of data required.
+            file_data = fh.read(amount)
+            
+            # Calculate the new offset into the file.
+            new_pos = pos + len(file_data)
+            
+            msg = self._encode(["D"+reply_id, pos]) + file_data
+            
+            # Send the request.
+            replied, data = self._send_request(
+                msg, host, ["r"], new_id = reply_id
+                )
+            
+            if replied == -1:
+            
+                return
+            
+            elif replied == 1:
+            
+                # Read the header.
+                pass
+            
+            
+        if 0:
+        
+            # If the amount of data requested by the client cannot be sent
+            # then send a "D" ... message indicating the amount of data
+            # being supplied.
+            
+            header = self._encode([pos])
+            
+            trailer = None
+        
+        # Construct the information string.
+        info = header + file_data
+        
+        return info, trailer, new_pos
+        if info is not None and pos == length:
+        
+            msg = self._encode(["S"+reply_id]) + info + \
+                self._encode("B"+reply_id) + trailer
+            
+            # Send the message.
+            _socket.sendto(msg, address)
+        
+        elif info is not None and pos < length:
+        
+            # Less data than the remote client requested was
+            # read from the file.
+            msg = self._encode(["D"+reply_id]) + info
+            
+            # Send the message.
+            _socket.sendto(msg, address)
+        
+        else:
+        
+            msg = ["E"+reply_id, 0x100d6, "Not found"]
+            
+            # Send a reply.
+            self._send_list(msg, _socket, address)
     
     def read_poll_socket(self):
     
@@ -2182,694 +3950,515 @@ class Peer(Common, Ports):
         
         msg = None
         
-        if command == "A" and (code == 0x1 or code == 0x2 or code == 0x4):
+        if command == "A":
         
-            # Attempt to open a share, directory or path.
-            path = self.read_string(
-                data[12:], ending = "\x00", include = 0
-                )
+            if code == 0x1:
             
-            # Split the path up into elements.
-            path_elements = string.split(path, ".")
-            
-            # The first element is the share name.
-            share_name = path_elements[0]
-            
-            self.log(
-                "comment",
-                'Request to open "%s" using %s' % (
-                    share_name, path_elements[1:]
-                    ),
-                ""
-                )
-            
-            if self.shares.has_key((share_name, Hostaddr)):
-            
-                if len(path_elements) == 1:
+                # Open a share, directory or path.
                 
-                    if code != 0x4:
-                    
-                        # For unprotected shares, reply with details of the share.
-                        
-                        # Use the first word given but substitute "R" for "A".
-                        # Set the filetype to be a share (0xfcd), the date as
-                        # the time when the share was added, the length as
-                        # a standard value, the access attributes are
-                        # converted from the mode value given and the object
-                        # type as a standard value.
-                        
-                        share = self.shares[(share_name, Hostaddr)]
-                        
-                        cs = self.to_riscos_time(ttuple = share.date)
-                        
-                        filetype_word, date_word = \
-                            self._make_riscos_filetype_date(0xfcd, cs)
-                        
-                        access_attr = self.to_riscos_access(mode = share.mode)
-                        
-                        msg = \
-                        [
-                            "R"+reply_id, filetype_word, date_word, 0x800,
-                            access_attr, 0x102, 0
-                        ]
-                    
-                    else:
-                    
-                        # Attempt to create a new object with the share name.
-                        msg = \
-                        [
-                            "E"+reply_id, 0xaf,
-                            "'%s' cannot be created - " % path + \
-                            "a directory with that name already exists"
-                        ]
+                # Find the share and RISC OS path within it.
+                share_name, ros_path = self.read_share_path(data[12:])
+                
+                self.log(
+                    "comment", 'Request to open "%s" in share "%s"' % (
+                        ros_path, share_name
+                        ), ""
+                    )
+                
+                try:
+                
+                    share = self.shares[(share_name, Hostaddr)]
+                    info, path = share.open_path(ros_path)
+                
+                except KeyError:
+                
+                    info = None
+                
+                if info is not None:
+                
+                    msg = ["R"+reply_id] + info
+                
+                elif ros_path == "":
+                
+                    # Reply with an error message.
+                    self._send_list(
+                        ["E"+reply_id, 0x163ac, "Shared disc not available."],
+                        _socket, address
+                        )
                 
                 else:
                 
-                    # Read the directory name associated with this share;
-                    # the file mode will also be useful.
-                    share = self.shares[(share_name, Hostaddr)]
-                    
-                    # Construct a path to the object below the shared
-                    # directory.
-                    #path = self.construct_directory_name(path_elements[1:])
-                    path = self.from_riscos_filename(
-                        string.join(path_elements[1:], ".")
-                        )
-                    
-                    # Append this path to the shared directory's path.
-                    path = os.path.join(share.directory, path)
-                    
-                    self.log("comment", "Original path: %s" % path, "")
-                    
-                    # Look for a suitable file.
-                    new_path = self.find_relevant_file(path)
-                    
-                    self.log("comment", "Open path: %s" % new_path, "")
-                    
-                    if new_path is None and code == 0x4:
-                        
-                        # File is being sent.
-                        
-                        try:
-                        
-                            # Create an object on the local filesystem.
-                            path = path + DEFAULT_SUFFIX
-                            open(path, "wb").write("")
-                            os.chmod(path, share.mode)
-                        
-                        except IOError:
-                        
-                            path = None
-                        
-                        except OSError:
-                        
-                            os.remove(path)
-                            path = None
-                    
-                    elif new_path is not None and code == 0x4:
-                    
-                        # File is being sent but one already exists.
-                        
-                        try:
-                        
-                            # Create an object on the local filesystem.
-                            open(new_path, "wb").write("")
-                            os.chmod(new_path, share.mode)
-                            path = new_path
-                        
-                        except IOError:
-                        
-                            path = None
-                        
-                        except OSError:
-                        
-                            os.remove(path)
-                            path = None
-                    
-                    else:
-                    
-                        # Whether the file exists or not, use the new
-                        # path if we are not creating or overwriting a
-                        # file.
-                        path = new_path
-                    
-                    self.log("comment", "Actual path: %s" % path, "")
-                    
-                    # Try to find the details of the object.
-                    
-                    if path is not None and os.path.isdir(path):
-                    
-                        # A directory
-                        
-                        filetype, date, length, access_attr, object_type, \
-                            handle = self.read_path_info(path)
-                        
-                        # Keep this handle for possible later use.
-                        if not self.handles.has_key(handle):
-                        
-                            self.handles[handle] = Directory(path)
-                        
-                        msg = [ "R"+reply_id, filetype, date, length,
-                                access_attr, object_type, handle ]
-                    
-                    elif path is not None and os.path.isfile(path):
-                    
-                        # A file
-                        
-                        filetype, date, length, access_attr, object_type, \
-                            handle = self.read_path_info(path)
-                        
-                        # Keep this handle for possible later use.
-                        if not self.handles.has_key(handle):
-                        
-                            self.handles[handle] = File(path)
-                        
-                        else:
-                        
-                            fh = self.handles[handle]
-                            
-                            # Use the file object's length, if possible.
-                            length = fh.length()
-                        
-                        if code == 0x4:
-                        
-                            filetype = 0xdeaddead
-                            date = 0xdeaddead
-                            access_attr = 0x33
-                        
-                        msg = [ "R"+reply_id, filetype, date, length,
-                                access_attr, object_type, handle ]
-                    
-                    elif code != 0x4:
-                    
-                        # Reply with an error message.
-                        msg = ["E"+reply_id, 0x100d6, "Not found"]
-                    
-                    else:
-                    
-                        # Reply with an error message.
-                        msg = ["E"+reply_id, 0x100d6, "Not found"]
+                    # Reply with an error message.
+                    msg = ["E"+reply_id, 0x100d6, "Not found"]
+                
+                # For unprotected shares, reply with details of the share.
+                
+                # Use the first word given but substitute "R" for "A".
                 
                 # Send a reply.
                 self._send_list(msg, _socket, address)
             
-            else:
+            elif code == 0x2:
             
-                # Reply with an error message.
-                self._send_list(
-                    ["E"+reply_id, 0x163ac, "Shared disc not available."],
-                    _socket, address
-                    )
-        
-        elif command == "A" and code == 0x6:
-        
-            # Delete request.
-            
-            try:
-            
-                path = self.from_riscos_path(data[12:])
+                # Open a share, directory or path.
                 
-                # Find the relevant file.
-                path = self.find_relevant_file(path)
-                
-                self.log("comment", "Delete request: %s" % path, "")
-                
-                # Construct access attributes for the other client.
-                access_attr = self.to_riscos_access(path = path)
-                
-                object_type = self.to_riscos_objtype(path)
-                
-                os.remove(path)
-                
-                msg = [ "R"+reply_id, 0xdeaddead, 0xdeaddead, 0x00000000,
-                        access_attr, object_type ]
-            
-            except OSError:
-            
-                msg = ["E"+reply_id, 0x100d6, "Not found"]
-            
-            except KeyError:
-            
-                msg = ["E"+reply_id, 0x163ac, "Shared disc not available."]
-            
-            self._send_list(msg, _socket, address)
-        
-        elif command == "A" and code == 0x7:
-        
-            # Set access attributes
-            
-            access_attr = self.str2num(4, data[8:12])
-            
-            try:
-            
-                # Read the path on our machine.
-                path = self.from_riscos_path(data[16:])
-                
-                # Find the relevant file.
-                path = self.find_relevant_file(path)
-                
-                #print "Access request:", path
-                
-                # Convert the RISC OS attributes to a mode value.
-                mode = self.from_riscos_access(access_attr)
-                
-                # Try to change the permissions on the object.
-                os.chmod(path, mode)
-                
-                # Construct the new details for the object.
-                filetype, date, length, access_attr, object_type, \
-                    handle = self.read_path_info(path)
-                
-                # Construct a reply.
-                msg = [ "R"+reply_id, filetype, date, length,
-                        access_attr, object_type ]
-            
-            except OSError:
-            
-                msg = ["E"+reply_id, 0x100d6, "Not found"]
-            
-            except KeyError:
-            
-                msg = ["E"+reply_id, 0x163ac, "Shared disc not available."]
-            
-            self._send_list(msg, _socket, address)
-        
-        elif command == "A" and code == 0x9:
-        
-            # Rename file on our machine.
-            
-            try:
-            
-                path = self.from_riscos_path(data[16:])
-                
-                print "Rename:", path
-                
-                filetype, date, length, access_attr, object_type, \
-                    handle = self.read_path_info(path)
-                
-                msg = [ "R"+reply_id, filetype, date, length,
-                        access_attr, object_type, handle ]
-                        
-            except OSError:
-            
-                msg = ["E"+reply_id, 0x100d6, "Not found"]
-            
-            except KeyError:
-            
-                msg = ["E"+reply_id, 0x163ac, "Shared disc not available."]
-            
-            self._send_list(msg, _socket, address)
-        
-        elif command == "A" and code == 0xa:
-        
-            # Close file.
-            
-            handle = self.str2num(4, data[8:12])
-            
-            # If the handle is in use then remove it from the handle
-            # dictionary.
-            try:
-            
-                fh = self.handles[handle]
-                
-                fh.close()
-                
-                del self.handles[handle]
-            
-            except KeyError:
-            
-                # Ideally, reply with an error message about the file handle
-                # used.
-                pass
-            
-            # Reply with an short message.
-            msg = ["R"+reply_id]
-            
-            self._send_list(msg, _socket, address)
-        
-        elif command == "A" and code == 0xc:
-        
-            # Load named file
-            
-            # The remote client has passed the handle, some word
-            # and the length of the file.
-            handle = self.str2num(4, data[8:12])
-            pos = self.str2num(4, data[12:16])
-            amount = self.str2num(4, data[16:20])
-            
-            # Translate the handle into a path.
-            fh = self.handles[handle]
-            
-            path = fh.path
-            length = fh.length()
-            
-            self.log("comment", "", "")
-            self.log("comment", path, "")
-            self.log("comment", "Length of file: %i" % length, "")
-            
-            # Extract the host name from the address as it is assumed that
-            # communication will be through port 49171.
-            host = address[0]
-            
-            # Start a new thread to request and handle the incoming data.
-            
-            # Create a lock to prevent multiple threads working on the
-            # same file at the same time.
-            if self.transfers.has_key(path):
-            
-                thread, host = self.transfers[path]
-                
-                while thread.isAlive():
-                
-                    pass
-            
-            # Create an event to use to inform the thread that it terminate.
-            event = threading.Event()
-            
-            # Record the event in the transfer events dictionary.
-            self.transfer_events[path] = event
-            
-            # Create a thread to run the share broadcast loop.
-            thread = threading.Thread(
-                group = None, target = self.transfer_file,
-                name = 'Transfer "%s" from %s:%i' % (
-                    path, address[0], address[1]
-                    ),
-                args = (
-                    event, reply_id, pos, amount, fh,
-                    _socket, address
-                    )
-                )
-            
-            # Record the thread in the transfers dictionary.
-            self.transfers[path] = thread, host
-            
-            # Start the thread.
-            thread.start()
-            
-            # Also notify the other client that the share has been updated.
-            
-        elif command == "A" and code == 0xe:
-        
-            # Set length of file.
-            handle = self.str2num(4, data[8:12])
-            length = self.str2num(4, data[12:16])
-            
-            msg = ["D"+reply_id, 0]
-            self._send_list(msg, _socket, address)
-            
-            msg = ["R"+reply_id, 0x1234]
-            self._send_list(msg, _socket, address)
-        
-        elif command == "A" and code == 0xf:
-        
-            # Set length of file.
-            
-            handle = self.str2num(4, data[8:12])
-            new_length = self.str2num(4, data[12:16])
-            
-            try:
-            
-                # Find the path and previously recorded file length.
-                fh = self.handles[handle]
-                
-                # Find the current file length.
-                length = fh.length()
+                # Find the share and RISC OS path within it.
+                share_name, ros_path = self.read_share_path(data[12:])
                 
                 self.log(
-                    "comment",
-                    "Change length from %i to %i" % (length, new_length), ""
+                    "comment", 'Request to open "%s" in share "%s"' % (
+                        ros_path, share_name
+                        ), ""
                     )
                 
-                # If the length is to be changed then open the file for
-                # changing.
-                if length != new_length:
+                try:
                 
-                    fh.set_length(new_length)
+                    share = self.shares[(share_name, Hostaddr)]
+                    info, path = share.open_path(ros_path)
                 
-                msg = ["R"+reply_id, new_length]
+                except KeyError:
+                
+                    info = None
+                
+                if info is not None:
+                
+                    msg = ["R"+reply_id] + info
+                
+                elif ros_path == "":
+                
+                    # Reply with an error message.
+                    self._send_list(
+                        ["E"+reply_id, 0x163ac, "Shared disc not available."],
+                        _socket, address
+                        )
+                
+                else:
+                
+                    # Reply with an error message.
+                    msg = ["E"+reply_id, 0x100d6, "Not found"]
+                
+                # Send a reply.
+                self._send_list(msg, _socket, address)
             
-            except IOError:
+            elif code == 0x4:
             
-                msg = ["E"+reply_id, 0x100d6, "Not found"]
-            
-            except KeyError:
-            
-                # We should probably complain about the file handle
-                # rather than about the path.
-                msg = ["E"+reply_id, 0x100d6, "Not found"]
-            
-            ## If we can accept the file then respond with a terse reply.
-            #msg = ["D"+reply_id, 0]
-            #self._send_list(msg, _socket, address)
-            #
-            self._send_list(msg, _socket, address)
+                # Create and open a share, directory or path.
+                
+                # Find the share and RISC OS path within it.
+                share_name, ros_path = self.read_share_path(data[12:])
+                
+                self.log(
+                    "comment", 'Request to create "%s" in share "%s"' % (
+                        ros_path, share_name
+                        ), ""
+                    )
+                
+                try:
+                
+                    share = self.shares[(share_name, Hostaddr)]
+                    info, path = share.create_path(ros_path)
+                
+                except KeyError:
+                
+                    info = None
+                
+                if info is not None:
+                
+                    msg = ["R"+reply_id] + info
+                
+                elif ros_path == "":
+                
+                    msg = \
+                    [
+                        "E"+reply_id, 0xaf,
+                        "'%s' cannot be created - " % path + \
+                        "a directory with that name already exists"
+                    ]
+                
+                else:
+                
+                    # Reply with an error message.
+                    msg = ["E"+reply_id, 0x100d6, "Not found"]
+                
+                # Send a reply.
+                self._send_list(msg, _socket, address)
         
-        elif command == "A" and code == 0x10:
-        
-            # Set the file type of a file on our machine.
+            elif code == 0x6:
             
-            handle = self.str2num(4, data[8:12])
-            filetype_word = self.str2num(4, data[12:16])
-            date_word = self.str2num(4, data[16:20])
-            
-            try:
-            
-                # Read the file handle of the file on our machine.
-                fh = self.handles[handle]
+                # Delete request.
                 
-                # Convert its path to a RISC OS style filetype and path.
-                filetype, ros_path = self.suffix_to_filetype(fh.path)
+                # Find the share and RISC OS path within it.
+                share_name, ros_path = self.read_share_path(data[12:])
                 
-                # Find the filetype and date from the words given.
-                filetype, date = \
-                    self.take_riscos_filetype_date(filetype_word, date_word)
+                try:
                 
-                # Determine the correct suffix to use for the file.
-                new_path = self.filetype_to_suffix(ros_path, filetype)
-                
-                self.log("comment", "Renaming %s to %s" % (fh.path, new_path), "")
-                
-                if fh.path != new_path:
-                
-                    del self.handles[handle]
+                    share = self.shares[(share_name, Hostaddr)]
+                    info, path = share.delete_path(ros_path)
                     
-                    # Try to rename the object.
-                    os.rename(fh.path, new_path)
+                    if info is not None:
                     
-                    # Transfer the file handle to the file on the new path.
-                    self.handles[handle] = fh
+                        msg = [ "R"+reply_id ] + info
+                    
+                    else:
+                    
+                        msg = ["E"+reply_id, 0x100d6, "Not found"]
                 
-                # Construct the new details for the object.
-                filetype, date, length, access_attr, object_type, \
-                    handle = self.read_path_info(new_path)
+                except KeyError:
                 
-                # Keep the length from the original file.
+                    msg = ["E"+reply_id, 0x163ac, "Shared disc not available."]
+                
+                # Send a reply.
+                self._send_list(msg, _socket, address)
+            
+            elif code == 0x7:
+            
+                # Set access attributes
+                
+                access_attr = self.str2num(4, data[8:12])
+                
+                # Find the share and RISC OS path within it.
+                share_name, ros_path = self.read_share_path(data[16:])
+                
+                try:
+                
+                    share = self.shares[(share_name, Hostaddr)]
+                    info, path = share.set_access_attr(ros_path, access_attr)
+                    
+                    if info is not None:
+                    
+                        # Construct a reply.
+                        msg = [ "R"+reply_id ] + info
+                    
+                    else:
+                    
+                        msg = ["E"+reply_id, 0x100d6, "Not found"]
+                
+                except KeyError:
+                
+                    msg = ["E"+reply_id, 0x163ac, "Shared disc not available."]
+                
+                # Send a reply.
+                self._send_list(msg, _socket, address)
+            
+            elif code == 0x9:
+            
+                # Rename file on our machine.
+                
+                # Find the share and RISC OS path within it.
+                share_name, ros_path = self.read_share_path(data[16:])
+                
+                try:
+                
+                    share = self.shares[(share_name, Hostaddr)]
+                    info, path = share.rename_path(ros_path)
+                    
+                    print "Rename:", path
+                    
+                    if info is not None:
+                    
+                        msg = [ "R"+reply_id ] + info
+                    
+                    else:
+                    
+                        msg = ["E"+reply_id, 0x100d6, "Not found"]
+                
+                except KeyError:
+                
+                    msg = ["E"+reply_id, 0x163ac, "Shared disc not available."]
+                
+                # Send a reply.
+                self._send_list(msg, _socket, address)
+            
+            elif code == 0xa:
+            
+                # Close file.
+                
+                handle = self.str2num(4, data[8:12])
+                
+                # If the handle is in use then remove it from the handle
+                # dictionary.
+                try:
+                
+                    fh = self.file_handler[handle]
+                    
+                    fh.close()
+                    
+                    del self.file_handler[handle]
+                    
+                    # Reply with an short message.
+                    msg = ["R"+reply_id]
+                
+                except KeyError:
+                
+                    # Ideally, reply with an error message about the file handle
+                    # used.
+                    msg = ["R"+reply_id]
+                
+                # Send a reply.
+                self._send_list(msg, _socket, address)
+            
+            elif code == 0xb:
+            
+                # Send file (data request)
+                
+                handle = self.str2num(4, data[8:12])
+                pos = self.str2num(4, data[12:16])
+                length = self.str2num(4, data[16:20])
+                
+                print "Data request", hex(handle), pos, length
+                
+                # Extract the host name from the address as it is assumed that
+                # communication will be through port 49171.
+                host = address[0]
+                
+                try:
+                
+                    fh = self.file_handler[handle]
+                    
+                    path = fh.path
+                    
+                    # Start a new thread to request and handle the incoming data.
+                    
+                    # Create a lock to prevent multiple threads working on the
+                    # same file at the same time.
+                    if self.transfers.has_key(path):
+                    
+                        thread, host = self.transfers[path]
+                        
+                        while thread.isAlive():
+                        
+                            pass
+                    
+                    # Create an event to use to inform the thread that it terminate.
+                    event = threading.Event()
+                    
+                    # Record the event in the transfer events dictionary.
+                    self.transfer_events[path] = event
+                    
+                    # Create a thread to run the share broadcast loop.
+                    thread = threading.Thread(
+                        group = None, target = self.send_file,
+                        name = 'Transfer "%s" to %s:%i' % (
+                            path, address[0], address[1]
+                            ),
+                        args = (
+                            event, reply_id, pos, length, fh,
+                            _socket, address
+                            )
+                        )
+                    
+                    # Record the thread in the transfers dictionary.
+                    self.transfers[path] = thread, host
+                    
+                    # Start the thread.
+                    thread.start()
+                
+                except KeyError:
+                
+                    # Reply with an error message.
+                    msg = ["E"+reply_id, 0x100d6, "Not found"]
+                    
+                    # Send a reply.
+                    self._send_list(msg, _socket, address)
+            
+            elif code == 0xc:
+            
+                # Receive file
+                
+                # The remote client has passed the handle, some word
+                # and the length of the file.
+                handle = self.str2num(4, data[8:12])
+                pos = self.str2num(4, data[12:16])
+                amount = self.str2num(4, data[16:20])
+                
+                # Translate the handle into a path.
+                fh = self.file_handler[handle]
+                
+                path = fh.path
                 length = fh.length()
                 
-                fh.path = new_path
+                self.log("comment", "", "")
+                self.log("comment", path, "")
+                self.log("comment", "Length of file: %i" % length, "")
                 
-                # Construct a reply.
-                msg = [ "R"+reply_id, filetype, date, length,
-                        access_attr, object_type ]
+                # Extract the host name from the address as it is assumed that
+                # communication will be through port 49171.
+                host = address[0]
+                
+                # Start a new thread to request and handle the incoming data.
+                
+                # Create a lock to prevent multiple threads working on the
+                # same file at the same time.
+                if self.transfers.has_key(path):
+                
+                    thread, host = self.transfers[path]
+                    
+                    while thread.isAlive():
+                    
+                        pass
+                
+                # Create an event to use to inform the thread that it terminate.
+                event = threading.Event()
+                
+                # Record the event in the transfer events dictionary.
+                self.transfer_events[path] = event
+                
+                # Create a thread to run the share broadcast loop.
+                thread = threading.Thread(
+                    group = None, target = self.receive_file,
+                    name = 'Transfer "%s" from %s:%i' % (
+                        path, address[0], address[1]
+                        ),
+                    args = (
+                        event, reply_id, pos, amount, fh,
+                        _socket, address
+                        )
+                    )
+                
+                # Record the thread in the transfers dictionary.
+                self.transfers[path] = thread, host
+                
+                # Start the thread.
+                thread.start()
+                
+                # Also notify the other client that the share has been updated.
+                
+            #elif code == 0xe:
+            #
+            #    # Set length of file.
+            #    handle = self.str2num(4, data[8:12])
+            #    length = self.str2num(4, data[12:16])
+            #    
+            #    msg = ["D"+reply_id, 0]
+            #    self._send_list(msg, _socket, address)
+            #    
+            #    msg = ["R"+reply_id, 0x1234]
+            #    self._send_list(msg, _socket, address)
             
-            except OSError:
+            elif code == 0xf:
             
-                msg = ["E"+reply_id, 0x100d6, "Not found"]
+                # Set length of file.
+                
+                handle = self.str2num(4, data[8:12])
+                new_length = self.str2num(4, data[12:16])
+                
+                try:
+                
+                    # Find the path and previously recorded file length.
+                    fh = self.file_handler[handle]
+                    
+                    # Find the current file length.
+                    length = fh.length()
+                    
+                    self.log(
+                        "comment",
+                        "Change length from %i to %i" % (length, new_length), ""
+                        )
+                    
+                    # If the length is to be changed then open the file for
+                    # changing.
+                    if length != new_length:
+                    
+                        fh.set_length(new_length)
+                    
+                    msg = ["R"+reply_id, new_length]
+                
+                except IOError:
+                
+                    msg = ["E"+reply_id, 0x100d6, "Not found"]
+                
+                except KeyError:
+                
+                    # We should probably complain about the file handle
+                    # rather than about the path.
+                    msg = ["E"+reply_id, 0x100d6, "Not found"]
+                
+                # Send a reply.
+                self._send_list(msg, _socket, address)
             
-            except KeyError:
+            elif code == 0x10:
             
-                msg = ["E"+reply_id, 0x100d6, "Not found"]
-            
-            self._send_list(msg, _socket, address)
+                # Set the file type of a file on our machine.
+                
+                handle = self.str2num(4, data[8:12])
+                filetype_word = self.str2num(4, data[12:16])
+                date_word = self.str2num(4, data[16:20])
+                
+                try:
+                
+                    # Read the file handle of the file on our machine.
+                    fh = self.file_handler[handle]
+                    
+                    # Use the policy of the share in which the file resides
+                    # to modify the file's attributes.
+                    share = fh.share
+                    
+                    del self.file_handler[handle]
+                    
+                    info = share.set_filetype(fh, filetype_word, date_word)
+                    
+                    if info is not None:
+                    
+                        handle = info[-1]
+                        
+                        # Transfer the file handle to the file on the new path.
+                        self.file_handler[handle] = fh
+                        
+                        # Construct a reply.
+                        msg = [ "R"+reply_id ] + info
+                    
+                    else:
+                    
+                        msg = ["E"+reply_id, 0x100d6, "Not found"]
+                
+                except KeyError:
+                
+                    msg = ["E"+reply_id, 0x100d6, "Not found"]
+                
+                # Send a reply.
+                self._send_list(msg, _socket, address)
         
         elif command == "B" and code == 0x3:
         
             # Request for information.
             
-            path = self.read_string(
-                data[16:], ending = "\x00", include = 0
-                )
-            
-            # Split the path up into elements.
-            path_elements = string.split(path, ".")
-            
-            # The first element is the share name.
-            share_name = path_elements[0]
-            
-            # Read the directory name associated with this share.
-            share = self.shares[(share_name, Hostaddr)]
-            
-            # Construct a path to the object below the shared
-            # directory.
-            #path = self.construct_directory_name(path_elements[1:])
-            
-            #print directory, path_elements[1:]
-            
-            path = self.from_riscos_filename(
-                string.join(path_elements[1:], ".")
-                )
-            
-            #print path
-            
-            # Append this path to the shared directory's path.
-            path = os.path.join(share.directory, path)
-                    
-            #print 'Request to catalogue "%s"' % path
-            
-            if not os.path.isdir(path):
-            
-                # Reply with an error message.
-                self._send_list(
-                    ["E"+reply_id, 0x163c5, "Not a Directory"],
-                    _socket, address
-                    )
-                
-                return
+            share_name, ros_path = self.read_share_path(data[16:])
             
             try:
             
-                # For unprotected shares, return a catalogue to the client.
+                # Read the directory name associated with this share.
+                share = self.shares[(share_name, Hostaddr)]
+                info, trailer, path = share.catalogue_path(ros_path)
                 
-                files = os.listdir(path)
+                if info is not None:
                 
-                # Write the message, starting with the code and ID word.
-                msg = ["S"+reply_id]
-                
-                # Write the catalogue information.
-                
-                # The first word is the length of the directory structure
-                # information.
-                # Calculate this later.
-                msg.append(0)
-                
-                # The next word is the length of the following share
-                # information.
-                msg.append(0x24)
-
-                dir_length = 0
-                
-                n_files = 0
-                
-                for file in files:
-                
-                    if string.find(file, os.extsep) == 0:
+                    # Write the message, starting with the code and ID word.
+                    msg = ["S"+reply_id] + info + ["B"+reply_id] + trailer
                     
-                        continue
+                    # Send the reply.
+                    self._send_list(msg, _socket, address)
                     
-                    file_msg = []
-                    length = 0
-                    
-                    # Construct the path to the file.
-                    this_path = os.path.join(path, file)
-                    
-                    try:
-                    
-                        # Filetype word
-                        filetype, filename = self.suffix_to_filetype(file)
-                        
-                        # Construct the filetype and date words.
-                        
-                        # The number of seconds since the last modification
-                        # to the file is read.
-                        seconds = os.stat(this_path)[os.path.stat.ST_MTIME]
-                        
-                        # Convert this to the RISC OS date format.
-                        cs = self.to_riscos_time(seconds = seconds)
-                        
-                        filetype_word = \
-                            0xfff00000 | (filetype << 8) | \
-                            ((cs & 0xff00000000) >> 32)
-                        
-                        file_msg.append(filetype_word)
-                        
-                        length = length + 4
-                        
-                        # Date word
-                        file_msg.append(cs & 0xffffffff)
-                        length = length + 4
-                        
-                        # Length word (0x800 for directory)
-                        if os.path.isdir(this_path):
-                        
-                            file_msg.append(0x800)
-                        
-                        else:
-                        
-                            file_msg.append(os.path.getsize(this_path))
-                        
-                        length = length + 4
-                        
-                        # Access attributes
-                        file_msg.append(self.to_riscos_access(path = this_path))
-                        
-                        length = length + 4
-                        
-                        # Object type (0x2 for directory)
-                        if os.path.isdir(this_path):
-                        
-                            file_msg.append(0x02)
-                        
-                        else:
-                        
-                            file_msg.append(0x01)
-                        
-                        length = length + 4
-                        
-                        # Convert the name into a form suitable for the
-                        # other client.
-                        #file_name = self.to_riscos_filename(file)
-                        
-                        # Zero terminated name string
-                        name_string = self._encode([filename + "\x00"])
-                        
-                        file_msg.append(name_string)
-                        
-                        length = length + len(name_string)
-                        
-                        n_files = n_files + 1
-                    
-                    except OSError:
-                    
-                        file_msg = []
-                        length = 0
-                    
-                    msg = msg + file_msg
-                    dir_length = dir_length + length
+                    #print
+                    #print "Sent:"
+                    #for line in self.interpret(self._encode(msg)):
+                    #
+                    #    print line
+                    #print
                 
-                # The data following the directory structure is concerned
-                # with the share and is like a return value from a share
-                # open request but with a "B" command word like a
-                # catalogue request.
+                elif trailer == "Not a directory":
                 
-                # Use the inode of the directory as its handle.
-                handle = os.stat(path)[os.path.stat.ST_INO] & 0xffffffff
+                    # Reply with an error message.
+                    self._send_list(
+                        ["E"+reply_id, 0x163c5, "Not a Directory"],
+                        _socket, address
+                        )
                 
-                share_value = (handle & 0xffffff00) ^ 0xffffff02
+                elif trailer == "Not found":
                 
-                msg = msg + \
-                [
-                    "B"+reply_id, 0xffffcd00, 0x00000000, 0x00000800,
-                       0x00000013, share_value, handle,     dir_length,
-                     # common value for this^  ^handle of object as with
-                     #                  share  info
-                       0xffffffff
-                ]
-                
-                # Fill in the directory length.
-                msg[1] = dir_length
-                
-                # Send the reply.
-                self._send_list(msg, _socket, address)
-                
-                #print
-                #print "Sent:"
-                #for line in self.interpret(self._encode(msg)):
-                #
-                #    print line
-                #print
+                    # Reply with an error message.
+                    msg = ["E"+reply_id, 0x100d6, "Not found"]
             
-            except (KeyError, OSError):
+            except KeyError:
             
                 # Reply with an error message.
                 self._send_list(
@@ -2877,7 +4466,7 @@ class Peer(Common, Ports):
                     _socket, address
                     )
         
-        elif (command == "A" or command == "B") and code == 0xb:
+        elif command == "B" and code == 0xb:
         
             # Data request ("B")
             
@@ -2887,34 +4476,21 @@ class Peer(Common, Ports):
             
             length = min(length, SEND_SIZE)
             
-            #print "Data request", hex(handle), pos, length
+            print "Data request", hex(handle), pos, length
             
             try:
             
                 # Match the handle to the file to use.
-                fh = self.handles[handle]
+                fh = self.file_handler[handle]
                 
                 file_length = fh.length()
                 
-                #print path, file_length
-                
-                # Read the data from the file.
-                #f = open(path, "rb")
-                #f.seek(pos, 0)
-                #file_data = f.read(length)
-                #f.close()
                 fh.seek(pos, 0)
                 
                 file_data = fh.read(length)
                 
                 # Calculate the new offset into the file.
                 new_pos = pos + len(file_data)
-                
-                if new_pos >= file_length:
-                
-                    # Remove the entry from the list.
-                    #del self.handles[handle]
-                    pass
                 
                 # Write the message header.
                 header = ["S"+reply_id, len(file_data), 0xc]
@@ -2940,18 +4516,12 @@ class Peer(Common, Ports):
             except (KeyError, IOError):
             
                 # Reply with an error message.
-                #lines = self.interpret(data)
-                #
-                #for line in lines:
-                #
-                #    print line
-                #print
                 msg = self._encode(["E"+reply_id, 0x100d6, "Not found"])
             
             # Send the message.
             _socket.sendto(msg, address)
         
-        elif command == "B" and code == 0xd:
+        elif (command == "A" or command == "B") and code == 0xd:
         
             # Rebroadcasted request for information.
             
@@ -2995,6 +4565,11 @@ class Peer(Common, Ports):
             # Data sent to this client for uploading.
             self.share_messages.append(data)
         
+        elif command == "r":
+        
+            # Data sent to this client for uploading.
+            self.share_messages.append(data)
+        
         elif command == "w":
         
             # Request for data to be sent to a remote client for uploading.
@@ -3004,10 +4579,6 @@ class Peer(Common, Ports):
         
             #self.log("received", data, address)
             pass
-        
-        if msg is not None and type(msg) != types.StringType:
-        
-            self.log("sent", msg, address)
     
     
     # Method used in listening thread
@@ -3023,7 +4594,7 @@ class Peer(Common, Ports):
             self.read_listener_socket()
             self.read_share_socket()
             
-            if (time.time() - t0) > 60.0:
+            if (time.time() - t0) > TIDY_DELAY:
             
                 # Reset the timer and prune the list of transfers.
                 t0 = time.time()
@@ -3056,22 +4627,6 @@ class Peer(Common, Ports):
         self.listen_thread.start()
         
         return
-        
-        # Serve in a loop which can be terminated by a keyboard interrupt
-        # (CTRL-C).
-        try:
-        
-            while 1:
-            
-                self._serve()
-        
-        except KeyboardInterrupt:
-        
-            pass
-    
-    def _serve(self):
-    
-        pass
     
     def stop(self):
     
@@ -3235,7 +4790,10 @@ class Peer(Common, Ports):
                 "Invalid hexadecimal value for filetype: %s" % filetype
                 )
             
-            share = Share(name, directory, mode, delay, present, filetype, self)
+            share = Share(
+                name, directory, mode, delay, present, filetype,
+                self.file_handler
+                )
             
             self.shares[(name, Hostaddr)] = share
         
@@ -3324,910 +4882,25 @@ class Peer(Common, Ports):
         del self.printers[(name, Hostaddr)]
         del self.printer_events[name]
     
-    def _scan_messages(self, commands, new_id):
+    def open_share(self, name, host):
     
-        for data in self.share_messages:
+        try:
         
-            for command in commands:
-            
-                if data[:4] == command + new_id:
-                
-                    # Remove the claimed message from the list.
-                    self.share_messages.remove(data)
-                    
-                    #self.data = data
-                    
-                    # Reply indicating that valid data was received.
-                    return 1, data
-                
-            if data[:4] == "E"+new_id:
-            
-                #print 'Error: "%s"' % data[8:]
-                self.share_messages.remove(data)
-                
-                return -1, (self.str2num(4, data[4:8]), data[8:])
+            return self.open_shares[(name, host)]
         
-        # Return a negative result.
-        return 0, (0, "The machine containing the shared disc does not respond")
-    
-    def _all_messages(self, commands, new_id):
-    
-        messages = []
+        except KeyError:
         
-        for data in self.share_messages:
+            pass
         
-            for command in commands:
-            
-                if data[:4] == command + new_id:
-                
-                    # Remove the claimed message from the list.
-                    self.share_messages.remove(data)
-                    
-                    # Add it to the list of messages found.
-                    messages.append(data)
+        share = RemoteShare(name, host, self.share_messages)
         
-        return messages
-    
-    def _expect_reply(self, _socket, msg, host, new_id, commands,
-                      tries = 5, delay = 2):
-    
-        replied = 0
+        info = share.open(name)
         
-        # Keep a record of the time of the previous request.
-        t0 = time.time()
+        if info is not None:
         
-        while tries > 0:
-        
-            # See if the response has arrived.
-            replied, data = self._scan_messages(commands, new_id)
-            
-            # If a message was found or an error occurred then return
-            # immediately.
-            if replied != 0:
-            
-                return replied, data
-            
-            t1 = time.time()
-            
-            if replied == 0 and (t1 - t0) > 1.0:
-            
-                # Send the request again.
-                self.log("sent", msg, (host, 49171))
-                self._send_list(msg, _socket, (host, 49171))
-                
-                t0 = t1
-                tries = tries - 1
-        
-        # Return a negative result.
-        return 0, (0, "The machine containing the shared disc does not respond")
-    
-    def _send_request(self, msg, host, commands, new_id = None, tries = 5,
-                      delay = 2):
-    
-        """replied, data = _send_reqest(self, msg)
-        
-        Send a message via the non-broadcast share port to a remote client
-        and wait for a reply.
-        """
-        # Use the non-broadcast socket.
-        if not self.ports.has_key(49171):
-        
-            print "No socket to use for port %i" % 49171
-            return 0, []
-        
-        s = self.ports[49171]
-        
-        if new_id is None:
-        
-            # Use a new ID for this message.
-            new_id = self.new_id()
-        
-        # Create the command to send. The three bytes following the
-        # command character are used to identify the response from the
-        # other client (it passes them back in its response).
-        msg[0] = msg[0] + new_id
-        
-        # Send a request.
-        self.log("sent", msg, (host, 49171))
-        
-        # Send the request.
-        self._send_list(msg, s, (host, 49171))
-        
-        # Wait for a reply.
-        replied, data = \
-            self._expect_reply(s, msg, host, new_id, commands, tries, delay)
-        
-        #if replied == 1:
-        #
-        #    self.log("received", data, (host, 49171))
-        #
-        #else:
-        #
-        #    # The data value is a tuple if an error occurs.
-        #    self.log("received", data[1], (host, 49171))
-        
-        return replied, data
-    
-    def _read_file_info(self, data):
-    
-        # Read the information on the object.
-        filetype_word = self.str2num(4, data[4:8])
-        filetype = (filetype_word & 0xfff00) >> 8
-        date_str = hex(self.str2num(4, data[4:8]))[-2:] + \
-                hex(self.str2num(4, data[8:12]))[2:]
-        
-        date = self.from_riscos_time(long(date_str, 16))
-        
-        length = self.str2num(4, data[12:16])
-        access_attr = self.str2num(4, data[16:20])
-        object_type = self.str2num(4, data[20:24])
-        
-        info = { "filetype": filetype, "date": date,
-                 "length": length,
-                 "access": access_attr, "type": object_type,
-                 "isdir": (object_type == 0x2) }
-        
-        if len(data) > 24:
-        
-            handle = self.str2num(4, data[24:28])
-            
-            info["handle"] = handle
-        
-        return info
-    
-    def open(self, name, host):
-    
-        """open(self, name, host)
-        
-        Open a resource of a given name on the host specified.
-        """
-        
-        msg = ["A", 1, 0, name+"\x00"]
-        
-        # Send the request.
-        replied, data = self._send_request(msg, host, ["R"])
-        
-        if replied != 1:
-        
-            return None
+            self.open_shares[(name, host)] = share
+            return share
         
         else:
         
-            print 'Successfully opened "%s"' % name
-        
-        # Return the information on the item.
-        return self._read_file_info(data)
-    
-    def catalogue(self, name, host):
-    
-        """lines = catalogue(self, name, host)
-        
-        Return a catalogue of the files on the named share on the host
-        given.
-        """
-        
-        msg = ["B", 3, 0xffffffff, 0, name+"\x00"]
-        
-        # Send the request.
-        replied, data = self._send_request(msg, host, ["S"])
-        
-        if replied != 1:
-        
-            return
-        
-        # Read the catalogue information.
-        c = 4
-        
-        # The first word is the length of the directory structure in bytes
-        # beginning with the next word.
-        dir_length = self.str2num(4, data[c:c+4])
-        c = c + 4
-        
-        start = c
-        
-        # The next word is the directory name.
-        c = c + 4
-        
-        lines = []
-        files = []
-        
-        while c < (start + dir_length):
-        
-            # Filetype word
-            filetype_word = self.str2num(4, data[c:c+4])
-            filetype = (filetype_word & 0xfff00) >> 8
-            c = c + 4
-            
-            # Unknown word
-            date_str = hex(filetype_word)[-2:] + \
-                hex(self.str2num(4, data[c:c+4]))[2:]
-            
-            date = self.from_riscos_time(long(date_str, 16))
-            
-            c = c + 4
-            
-            # Length word (0x800 for directory)
-            length = self.str2num(4, data[c:c+4])
-            c = c + 4
-            
-            # Access attributes
-            access_attr = self.str2num(4, data[c:c+4])
-            c = c + 4
-            
-            # Object type (0x2 for directory)
-            object_type = self.str2num(4, data[c:c+4])
-            c = c + 4
-            
-            # Zero terminated name string
-            name = self.read_string(
-                data, offset = c, ending = "\000", include = 0
-                )
-            
-            c = c + len(name) + 1
-            
-            if c % 4 != 0:
-            
-                c = c + 4 - (c % 4)
-            
-            files.append( (
-                filetype_word, date, length, access_attr, object_type, name
-                ) )
-            
-            lines.append(
-                "%s\t:\t%03x\t(%i bytes)\t%s\t%i\t%s" % (
-                    name, filetype, length,
-                    self.repr_mode(self.from_riscos_access(access_attr)),
-                    object_type,
-                    time.asctime(date)
-                    )
-                )
-        
-        for line in lines:
-        
-            print string.expandtabs(line, 4)
-        
-        # The data following the directory structure is concerned
-        # with the share and is like a return value from a share
-        # open request but with a "B" command word like a
-        # catalogue request.
-        
-        # Return the catalogue information.
-        return files
-    
-    cat = catalogue
-    
-    def get(self, name, host):
-    
-        # Read the object's information.
-        info = self.open(name, host)
-        
-        if info is None:
-        
-            return
-        
-        # Use the file handle obtained from the information retrieved about
-        # this object.
-        handle = info["handle"]
-        
-        file_data = []
-        pos = 0
-        
-        # Request packets smaller than the receive buffer size.
-        packet_size = RECV_SIZE - 24
-        
-        while pos < info["length"]:
-        
-            msg = ["B", 0xb, handle, pos, 0x800]
-            
-            # Send the request.
-            replied, data = self._send_request(msg, host, ["S"])
-            
-            if replied != 1:
-            
-                print "The machine containing the shared disc does not respond"
-                return
-            
-            # Read the header.
-            length = self.str2num(4, data[4:8])
-            trailer_length = self.str2num(4, data[8:12])
-            file_data.append(data[12:12+length])
-            
-            #print length, trailer_length, len(data)
-            
-            pos = pos + length
-            
-            if len(data[12+length:]) == trailer_length:
-            
-                returned = self.str2num(4, data[12+length+4:12+length+8])
-                new_pos = self.str2num(4, data[12+length+8:12+length+12])
-                
-                # We have found the packet's trailer.
-                sys.stdout.write(
-                    "\rRead %i/%i bytes of file %s" % (
-                        new_pos, info["length"], name
-                        )
-                    )
-                sys.stdout.flush()
-        
-        
-        # Ensure that the whole file has been read.
-        msg = ["B", 0xb, handle, info["length"], 0]
-        replied, data = self._send_request(msg, host, ["S"])
-        
-        if replied != 1:
-        
             return None
-        
-        else:
-        
-            length = self.str2num(4, data[4:8])
-            trailer_length = self.str2num(4, data[8:12])
-            
-            if len(data[12+length:]) == trailer_length:
-            
-                returned = self.str2num(4, data[12+length+4:12+length+8])
-                new_pos = self.str2num(4, data[12+length+8:12+length+12])
-                
-                # We have found the packet's trailer.
-                sys.stdout.write(
-                    "\rFile %s (%i bytes) read successfully" % (
-                        name, new_pos
-                        )
-                    )
-                sys.stdout.flush()
-        
-        # Close the resource.
-        self._close(handle, host)
-        
-        return string.join(file_data, "")
-    
-    def _close(self, handle, host):
-    
-        #if handle is None:
-        #
-        #    # Read the object's information.
-        #    info = self.open(name, host)
-        #    
-        #    if info is None:
-        #    
-        #        return
-        #    
-        #    # Use the file handle obtained from the information retrieved about
-        #    # this object to close the resource.
-        #    handle = info["handle"]
-        
-        msg = ["A", 0xa, handle]
-        replied, data = self._send_request(msg, host, ["R"])
-        
-        if replied != 1:
-        
-            return None
-    
-    def put(self, path, name, host):
-    
-        # Use the non-broadcast socket.
-        if not self.ports.has_key(49171):
-        
-            print "No socket to use for port %i" % 49171
-            return 0, []
-        
-        s = self.ports[49171]
-        
-        try:
-        
-            # Determine the file's relevant filetype and
-            # date words.
-            filetype_word, date_word = self.make_riscos_filetype_date(path)
-            
-            # Find the length of the file.
-            length = os.path.getsize(path)
-            
-            # Construct access attributes for the other client.
-            access_attr = self.to_riscos_access(path = path)
-            
-            # Use a default value for the object type.
-            object_type = 0x0101
-        
-        except OSError:
-        
-            print "Failed to find file: %s" % path
-            return
-        
-        # Convert the filename into a RISC OS filename on the share.
-        directory, file = os.path.split(path)
-        
-        self.log("comment", "File to put: %s" % file, "")
-        
-        filetype, ros_file = self.suffix_to_filetype(file)
-        
-        self.log("comment", "Remote file: %s" % ros_file, "")
-        
-        # Join the path with the share name to obtain a share-relative
-        # path.
-        ros_path = name + "." + ros_file
-        
-        self.log("comment", "Remote path: %s" % ros_path, "")
-        
-        # Create a file on the remote server.
-        msg = ["A", 0x4, 0, ros_path+"\x00"]
-        
-        # Send the request.
-        replied, data = self._send_request(msg, host, ["R"])
-        
-        if replied != 1:
-        
-            return
-        
-        # The data returned represents the information about the newly
-        # created remote file.
-        info = self._read_file_info(data)
-        
-        if info is None or not info.has_key("handle"):
-        
-            print "Cannot send file to client."
-            return
-        
-        # Send the file, from the start to  its length.
-        msg = ["A", 0xc, info["handle"], 0, length]
-        
-        # Send the request.
-        replied, data = self._send_request(msg, host, ["w"])
-        
-        if replied != 1:
-        
-            # Tidy up.
-            self._close(info["handle"], host)
-            
-            self.delete(ros_path, host)
-            return
-        
-        # A reply containing two words was returned. Presumably, the
-        # second is the length of the data to be sent and the first is
-        # the position in the file of the data requested (like the
-        # get method's "B" ... 0xb message.
-        reply_id = data[1:4]
-        from_addr = self.str2num(4, data[4:8])
-        to_addr = self.str2num(4, data[12:16])
-        amount = min(SEND_SIZE, to_addr - from_addr)
-        
-        try:
-        
-            f = open(path, "rb")
-            
-            while from_addr < length:
-            
-                f.seek(from_addr, 0)
-                
-                # Send a message with the offset of that data within the
-                # file.
-                msg = ["d"+reply_id, from_addr]
-                self.log("sent", msg, (host, 49171))
-                
-                # Read the data to be sent.
-                file_data = f.read(amount)
-                
-                # Don't pad the data sent.
-                msg = self._encode(msg) + file_data
-                self.log(
-                    "comment",
-                    "%i bytes of data sent in message." % len(file_data),
-                    ""
-                    )
-                
-                # Send the reply as a string.
-                s.sendto(msg, (host, 49171))
-                
-                # Wait for messages to arrive with the same ID as
-                # the one used to specify the file to be uploaded.
-                replied, data = self._expect_reply(
-                    s, msg, host, reply_id, ["w", "R"]
-                    )
-                
-                if replied != 1:
-                
-                    # Tidy up.
-                    self._close(info["handle"], host)
-                    
-                    self.delete(ros_path, host)
-                    
-                    f.close()
-                    
-                    print "Uploading was terminated."
-                    return
-                
-                #pos = pos + amount
-                if data[0] == "w":
-                
-                    # More data requested.
-                    reply_id = data[1:4]
-                    from_addr = self.str2num(4, data[4:8])
-                    to_addr = self.str2num(4, data[12:16])
-                    amount = min(SEND_SIZE, to_addr - from_addr)
-                
-                elif data[0] == "R":
-                
-                    from_addr = self.str2num(4, data[4:8])
-                    total_length = self.str2num(4, data[8:12])
-                    break
-                
-                sys.stdout.write(
-                    "\rWritten %i/%i bytes of file %s" % (
-                        from_addr, length, ros_path
-                        )
-                    )
-                sys.stdout.flush()
-            
-            # Remove all relevant messages from the message list.
-            messages = self._all_messages(["w", "R"], reply_id)
-            
-            print "Discarded messages."
-            for msg in messages:
-            
-                for line in self.interpret(msg):
-                
-                    print line
-                print
-            
-            # When all the data has been sent, send an empty "d" message.
-            msg = ["d"+reply_id, length]
-            self.log("sent", msg, (host, 49171))
-            
-            self._send_list(msg, s, (host, 49171))
-            
-            sys.stdout.write(
-                '\rFile "%s" (%i bytes) successfully written to "%s"' % (
-                    path, length, ros_path
-                    )
-                )
-            sys.stdout.flush()
-        
-        except IOError:
-        
-            # Tidy up.
-            self._close(info["handle"], host)
-            
-            self.delete(ros_path, host)
-            
-            print "Uploading was terminated."
-            return
-        
-        # Set the filetype and date stamp.
-        msg = [ "A", 0x10, info["handle"], filetype_word, date_word ]
-        
-        # Send the request.
-        replied, data = self._send_request(msg, host, ["R"])
-        
-        if replied != 1:
-        
-            # Tidy up.
-            self._close(info["handle"], host)
-            
-            self.delete(ros_path, host)
-            return
-        
-        # Tidy up.
-        self._close(info["handle"], host)
-    
-    def pput(self, path, name, host):
-    
-        # Use the non-broadcast socket.
-        if not self.ports.has_key(49171):
-        
-            print "No socket to use for port %i" % 49171
-            return 0, []
-        
-        s = self.ports[49171]
-        
-        try:
-        
-            # Determine the file's relevant filetype and
-            # date words.
-            filetype_word, date_word = self.make_riscos_filetype_date(path)
-            
-            # Find the length of the file.
-            length = os.path.getsize(path)
-            
-            # Construct access attributes for the other client.
-            access_attr = self.to_riscos_access(path = path)
-            
-            # Use a default value for the object type.
-            object_type = 0x0101
-        
-        except OSError:
-        
-            print "Failed to find file: %s" % path
-            return
-        
-        # Convert the filename into a RISC OS filename on the share.
-        directory, file = os.path.split(path)
-        
-        self.log("comment", "File to put: %s" % file, "")
-        
-        filetype, ros_file = self.suffix_to_filetype(file)
-        
-        self.log("comment", "Remote file: %s" % ros_file, "")
-        
-        # Join the path with the share name to obtain a share-relative
-        # path.
-        ros_path = name + "." + ros_file
-        
-        self.log("comment", "Remote path: %s" % ros_path, "")
-        
-        # Create a file on the remote server.
-        msg = ["A", 0x4, 0, ros_path+"\x00"]
-        
-        # Send the request.
-        replied, data = self._send_request(msg, host, ["R"])
-        
-        if replied != 1:
-        
-            return
-        
-        # The data returned represents the information about the newly
-        # created remote file.
-        info = self._read_file_info(data)
-        
-        if info is None or not info.has_key("handle"):
-        
-            print "Cannot send file to client."
-            return
-        
-        try:
-        
-            f = open(path, "rb")
-            
-            start_addr = 0
-            
-            while start_addr < length:
-            
-                # Send the file, from the start to  its length.
-                next_addr = min(length, start_addr + SEND_PPUT_SIZE)
-                
-                # Send the start offset into the file and the amount of data
-                # to be transferred.
-                msg = [ "A", 0xc, info["handle"], start_addr,
-                        next_addr - start_addr ]
-                
-                # Send the request.
-                replied, data = self._send_request(msg, host, ["w"])
-                
-                if replied != 1:
-                
-                    # Tidy up.
-                    self._close(info["handle"], host)
-                    
-                    self.delete(ros_path, host)
-                    return
-                
-                # A reply containing two words was returned. These are the
-                # start and end offsets into the file relative to the
-                # start offset we gave previously.
-                
-                from_addr = start_addr
-                
-                while 1:
-                
-                    if data[0] == "w":
-                    
-                        # More data requested.
-                        reply_id = data[1:4]
-                        
-                        # Convert the relative addresses into absolute ones.
-                        from_addr = start_addr + self.str2num(4, data[4:8])
-                        
-                        to_addr = start_addr + \
-                            min(self.str2num(4, data[12:16]), next_addr)
-                            
-                        amount = min(SEND_SIZE, to_addr - from_addr)
-                    
-                    elif data[0] == "R":
-                    
-                        # Convert the relative addresses into absolute ones.
-                        from_addr = start_addr + self.str2num(4, data[4:8])
-                        #total_length = start_addr + self.str2num(4, data[8:12])
-                        break
-                    
-                    f.seek(from_addr, 0)
-                    
-                    # Send a message with the offset of that data within the
-                    # file. The address sent is relative to the start of the
-                    # block specified.
-                    msg = ["d"+reply_id, from_addr - start_addr]
-                    self.log("sent", msg, (host, 49171))
-                    
-                    # Read the data to be sent.
-                    file_data = f.read(amount)
-                    
-                    # Don't pad the data sent.
-                    msg = self._encode(msg) + file_data
-                    self.log(
-                        "comment",
-                        "%i bytes of data sent in message." % len(file_data),
-                        ""
-                        )
-                    
-                    # Send the reply as a string.
-                    s.sendto(msg, (host, 49171))
-                    
-                    # Send a message with the amount of data specified.
-                    # The address sent is relative to the start of the
-                    # block specified.
-                    msg = ["d", from_addr - start_addr]
-    
-                    # Wait for messages to arrive with the same ID as
-                    # the one used to specify the file to be uploaded.
-                    replied, data = self._send_request(
-                        msg, host, ["w", "R"], new_id = reply_id
-                        )
-                    
-                    if replied != 1:
-                    
-                        # Tidy up.
-                        self._close(info["handle"], host)
-                        
-                        self.delete(ros_path, host)
-                        
-                        f.close()
-                        
-                        print "Uploading was terminated."
-                        return
-                
-                #pos = pos + amount
-                sys.stdout.write(
-                    "\rWritten %i/%i bytes of file %s" % (
-                        from_addr, length, ros_path
-                        )
-                    )
-                sys.stdout.flush()
-                
-                # Increase the start position.
-                start_addr = next_addr
-            
-            # Remove all relevant messages from the message list.
-            messages = self._all_messages(["w", "R"], reply_id)
-            
-            print "Discarded messages."
-            for msg in messages:
-            
-                for line in self.interpret(msg):
-                
-                    print line
-                print
-            
-            # When all the data has been sent, send an empty "d" message.
-            msg = ["d"+reply_id, length]
-            self.log("sent", msg, (host, 49171))
-            
-            self._send_list(msg, s, (host, 49171))
-            
-            sys.stdout.write(
-                '\rFile "%s" (%i bytes) successfully written to "%s"' % (
-                    path, length, ros_path
-                    )
-                )
-            sys.stdout.flush()
-        
-        except IOError:
-        
-            # Tidy up.
-            self._close(info["handle"], host)
-            
-            self.delete(ros_path, host)
-            
-            print "Uploading was terminated."
-            return
-        
-        # Set the filetype and date stamp.
-        msg = [ "A", 0x10, info["handle"], filetype_word, date_word ]
-        
-        # Send the request.
-        replied, data = self._send_request(msg, host, ["R"])
-        
-        if replied != 1:
-        
-            # Tidy up.
-            self._close(info["handle"], host)
-            
-            self.delete(ros_path, host)
-            return
-        
-#        # Set the file's length.
-#        msg = ["A", 0xf, info["handle"], length]
-#        
-#        # Send the request.
-#        replied, data = self._send_request(msg, host, ["R"])
-#        
-#        if replied != 1:
-#        
-#            # Tidy up.
-#            self._close(info["handle"], host)
-#            
-#            self.delete(ros_path, host)
-#            return
-#        
-#        # Examine the message queue, looking for "D" messages.
-#        reply_id = data[1:4]
-#        
-#        found = 1
-#        while 1:
-#        
-#            r, d = self._scan_messages(["D"], reply_id)
-#            
-#            if r == 1:
-#                found = 1
-#            else:
-#                break
-        
-        #return msg
-        
-        # Tidy up.
-        self._close(info["handle"], host)
-    
-    def delete(self, name, host):
-    
-        """delete(self, name, host)
-        
-        Delete the named file on the specified host.
-        """
-        
-        msg = ["A", 0x6, 0, name + "\x00"]
-        
-        replied, data = self._send_request(msg, host, ["R"])
-        
-        if replied == 1:
-        
-            sys.stdout.write("Deleted %s on %s" % (name, host))
-            sys.stdout.flush()
-    
-    def rename(self, name1, name2, host):
-    
-        msg = ["A", 0x9, 0x10, 0, name1 + "\x00"]
-        
-        replied, data = self._send_request(msg, host, ["R"])
-        
-        if replied != 1:
-        
-            return
-        
-        # The data returned represents the information about the file.
-        info = self._read_file_info(data)
-        
-        
-    
-    def setmode(self, name, mode, host):
-    
-        access_attr = self.to_riscos_access(mode)
-        
-        msg = ["A", 0x7, access_attr, 0, name+"\x00"]
-        
-        replied, data = self._send_request(msg, host, ["R"])
-        
-        if replied != 1:
-        
-            return
-        
-        # Read the information returned.
-        info = self._read_file_info(data)
-        
-        return info
-    
-    def settype(self, name, filetype, host):
-    
-        # Obtain information on the file (open it).
-        info = self.open(name, host)
-        
-        cs = self.to_riscos_time(ttuple = info["date"])
-        
-        filetype_word, date_word = \
-            self._make_riscos_filetype_date(filetype, cs)
-        
-        msg = ["A", 0x10, info["handle"], filetype_word, date_word]
-        
-        replied, data = self._send_request(msg, host, ["R"])
-        
-        if replied != 1:
-        
-            return
-        
-        self._close(info["handle"], host)
-    
