@@ -15,6 +15,8 @@ DEFAULT_SUFFIX = os.extsep + "txt"
 between_epochs = ((365 * 70) + 17) * 24 * 360000
 
 RECV_SIZE = 16384
+RECV_PUT_SIZE = 8192
+
 SEND_SIZE = 16384
 
 
@@ -656,13 +658,17 @@ class Common:
         
         if direction[0] == "s":
         
-            self._log.append("Sent to %s:%i" % address)
-            self._log = self._log + self.interpret(self._encode(data))
+            lines = ["Sent to %s:%i" % address] + \
+                self.interpret(self._encode(data))
+                
+            self._log = self._log + lines
         
         elif direction[0] == "r":
         
-            self._log.append("Received from %s:%i" % address)
-            self._log = self._log + self.interpret(data)
+            lines = ["Received from %s:%i" % address] + \
+                self.interpret(data)
+            
+            self._log = self._log + lines
         
         else:
         
@@ -1615,7 +1621,7 @@ class Peer(Common):
                 # Note that the length parameter passed is the buffer size the remote
                 # client expects. However, we request packets which are small
                 # enough for our receive buffer.
-                packet_size = min(RECV_SIZE - 8, end - pos)
+                packet_size = min(RECV_PUT_SIZE, end - pos)
                 
                 # Construct a list to send to the remote client.
                 #msg = ["w", pos, 0, pos + packet_size]
@@ -1641,15 +1647,18 @@ class Peer(Common):
                     
                     # We must translate the address passed to us back into
                     # an absolute form.
-                    data_pos = self.str2num(4, data[4:8]) + start
                     
-                    self.log(
-                        "comment",
-                        "Data position within file: %i" % data_pos, ""
-                        )
+                    if len(data) > 8:
                     
-                    if len(data) > 8 and data_pos == pos:
-                    
+                        # Read the position in the file given by the other
+                        # client.
+                        data_pos = self.str2num(4, data[4:8]) + start
+                        
+                        self.log(
+                            "comment",
+                            "Data position (%x) file position (%x)" % (data_pos, pos), ""
+                            )
+                        
                         file_data = data[8:]
                         
                         fh.seek(data_pos, 0)
@@ -1663,18 +1672,23 @@ class Peer(Common):
                         
                         self.log(
                             "comment",
-                            "Read %i bytes of file %s" % (pos, fh.path), ""
+                            "Read a total of %i bytes of file %s" % (pos, fh.path), ""
                             )
                     
-                    elif data_pos >= end:
+                    else:
                     
-                        # A short block was received which indicates
-                        # that all the data was read.
-                        self.log(
-                            "comment",
-                            "Short block encountered at end of data.", ""
-                            )
-                        break
+                        # Read the amount of data sent in the previous message.
+                        data_pos = self.str2num(4, data[4:8]) + start
+                        
+                        if pos >= end:
+                        
+                            # A short block was received which indicates
+                            # that all the data was read.
+                            self.log(
+                                "comment",
+                                "Short block encountered at end of data.", ""
+                                )
+                            break
                 
                 else:
                 
@@ -2962,7 +2976,8 @@ class Peer(Common):
         
         else:
         
-            self.log("received", data, address)
+            #self.log("received", data, address)
+            pass
         
         if msg is not None and type(msg) != types.StringType:
         
@@ -3327,7 +3342,7 @@ class Peer(Common):
         
         return messages
     
-    def _expect_reply(self, _socket, data, host, new_id, commands,
+    def _expect_reply(self, _socket, msg, host, new_id, commands,
                       tries = 5, delay = 2):
     
         replied = 0
@@ -3351,7 +3366,8 @@ class Peer(Common):
             if replied == 0 and (t1 - t0) > 1.0:
             
                 # Send the request again.
-                self._send_list(data, _socket, (host, 49171))
+                self.log("sent", msg, (host, 49171))
+                self._send_list(msg, _socket, (host, 49171))
                 
                 t0 = t1
                 tries = tries - 1
