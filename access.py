@@ -1267,14 +1267,14 @@ class Peer(Common):
         # Read the host name from the address tuple.
         host = address[0]
         
-        # Wait for a response.
-        pos = 0
-        
         # Set the size of packets we can deal with.
         # Note that the length parameter passed is the buffer size the remote
         # client expects. However, we request packets which are small
         # enough for our receive buffer.
         packet_size = min(RECV_SIZE - 8, length)
+        
+        pos = 0
+        file_ptr = 0
         
         try:
         
@@ -1305,9 +1305,20 @@ class Peer(Common):
                     file_data = data[8:]
                     
                     f.write(file_data)
-                    pos = pos + len(data) - 8
+                    pos = data_pos + len(data) - 8
+                    file_ptr = pos
                     
-                    print "Read %i bytes of file %s" % (pos, path)
+                    print "Read %i bytes of file %s" % (file_ptr, path)
+                
+                else:
+                
+                    # The file pointer for the remote file has been
+                    # updated to the new position so we can read "from
+                    # zero".
+                    file_ptr = data_pos
+                    pos = data_pos
+                    
+                    print "At %i in file %s" % (file_ptr, path)
                 
                 # Check the event flag.
                 if event.isSet():
@@ -3245,21 +3256,20 @@ class Peer(Common):
         # the position in the file of the data requested (like the
         # get method's "B" ... 0xb message.
         reply_id = data[1:4]
-        pos = self.str2num(4, data[4:8])
-        amount = min(SEND_SIZE, self.str2num(4, data[12:16]))
-        
-        print pos, amount
+        from_addr = self.str2num(4, data[4:8])
+        to_addr = self.str2num(4, data[12:16])
+        amount = min(SEND_SIZE, to_addr - from_addr)
         
         try:
         
             f = open(path, "rb")
             
-            while pos < length:
+            while from_addr < length:
             
-                f.seek(pos, 0)
+                f.seek(from_addr, 0)
                 
                 # Send a message with the amount of data specified.
-                msg = ["d"+reply_id, pos]
+                msg = ["d"+reply_id, from_addr]
                 self.log("sent", msg, (host, 49171))
                 
                 # Read the data to be sent.
@@ -3299,17 +3309,19 @@ class Peer(Common):
                 
                     # More data requested.
                     reply_id = data[1:4]
-                    pos = self.str2num(4, data[4:8])
+                    from_addr = self.str2num(4, data[4:8])
+                    to_addr = self.str2num(4, data[12:16])
+                    amount = min(SEND_SIZE, to_addr - from_addr)
                 
                 elif data[0] == "R":
                 
-                    pos = self.str2num(4, data[4:8])
+                    from_addr = self.str2num(4, data[4:8])
                     total_length = self.str2num(4, data[8:12])
                     break
                 
                 sys.stdout.write(
                     "\rWritten %i/%i bytes of file %s" % (
-                        pos, length, ros_path
+                        from_addr, length, ros_path
                         )
                     )
                 sys.stdout.flush()
@@ -3326,10 +3338,10 @@ class Peer(Common):
                 print
             
             # When all the data has been sent, send an empty "d" message.
-            msg = ["d"+reply_id, 0]
-            self.log("sent", msg, (host, 49171))
-            
-            self._send_list(msg, s, (host, 49171))
+            #msg = ["d"+reply_id, 0]
+            #self.log("sent", msg, (host, 49171))
+            #
+            #self._send_list(msg, s, (host, 49171))
             
             sys.stdout.write(
                 '\rFile "%s" (%i bytes) successfully written to "%s"' % (
