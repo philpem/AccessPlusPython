@@ -11,3 +11,8 @@ A<id> 0xa <directory length>
     Suspect that this is to complain about the directory returned to the
     client in response to a previous "B" request. The directory length may
     be that returned at the end of the "S" response we previously sent.
+
+B<id> 0xb <handle> 0 <length>
+
+    This may be a complaint by the other client about the information
+    on an object we gave it following an "A" 1 request.
