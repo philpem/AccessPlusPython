@@ -4,8 +4,12 @@
     Tools for examining data send via UDP from an Access+ station.
 """
 
-import string, socket, sys, time, threading
+import string, socket, sys, time, threading, types
 
+
+# Define dummy values to use for constants with the _decode methd.
+# We could use enumerate but this is just as easy as the values will be
+# ignored; their types are the important pieces of information.
 
 
 class Access:
@@ -129,6 +133,67 @@ class Access:
         
         return s
     
+    def _encode(self, l):
+    
+        """
+        string = _encode(self, list)
+        
+        Join together the elements in the list supplied to form a string
+        which is acceptable to the other Access+ clients.
+        """
+    
+        output = []
+        
+        for item in l:
+        
+            if type(item) == types.IntType:
+            
+                output.append(self.number(4, item))
+            
+            else:
+            
+                # Pad the string to fit an integer number of words.
+                padding = 4 - (len(item) % 4)
+                
+                if padding == 4: padding = 0
+                
+                padded = item + (padding * "\000")
+                
+                output.append(padded)
+        
+        return string.join(output, "")
+    
+#    def _decode(self, s, format):
+#    
+#        """
+#        list = _decode(self, string, format)
+#        
+#        Extract the elements from the string supplied using the format
+#        list to a list.
+#        """
+#    
+#        output = []
+#        c = 0
+#        
+#        for i in range(0, len(format)):
+#        
+#            if type(format[i]item) == types.IntType:
+#            
+#                output.append(self.number(4, item))
+#            
+#            else:
+#            
+#                # Pad the string to fit an integer number of words.
+#                padding = 4 - (len(item) % 4)
+#                
+#                if padding == 4: padding = 0
+#                
+#                padded = item + (padding * "\000")
+#                
+#                output.append(padded)
+#        
+#        return string.join(output, "")
+    
     def interpret(self, data):
     
         lines = []
@@ -218,6 +283,16 @@ class Access:
         
             pass
     
+    def _send_list(self, l, s, to_addr):
+    
+        """send_list(self, list, socket, to_addr)
+        
+        Encode the list as a string suitable for other Access+ clients
+        using the _encode method then send it on the socket provided.
+        """
+        
+        s.sendto(self._encode(l), to_addr)
+    
     def broadcast_startup(self):
     
         """broadcast_startup(self)
@@ -287,26 +362,164 @@ class Access:
             while int(time.time() - t0) < delay:
             
                 # Read any response.
-                try:
-                
-                    data = s.recv(1024)
-                    
-                    sys.stdout.write("Polling data:\n")
-                    lines = self.interpret(data)
-                    for line in lines:
-                    
-                        sys.stdout.write(line + "\n")
-                    
-                    sys.stdout.flush()
-                
-                except socket.error:
-                
-                    if sys.exc_info()[1].args[0] == 11:
-                    
-                        pass
+                response = self.read_poll_socket(s)
                 
                 if event.isSet(): return
             
+    def read_poll_socket(self, s):
+    
+        try:
+        
+            data = s.recv(1024)
+        
+        except socket.error:
+        
+            if sys.exc_info()[1].args[0] == 11:
+            
+                pass
+            
+            return None
+        
+        # Check the first word of the response to determine what the
+        # information is about.
+        about = self.str2num(4, data[:4]) 
+        
+        if about & 0xffff0000 == 0x00010000:
+        
+            # A share
+            
+            if about & 0xffff == 0x0000:
+            
+                # Startup
+                print "Starting up shares"
+            
+            elif about & 0xffff == 0x0002:
+            
+                # Share made available
+                
+                # Ignore the second word
+                
+                # The first byte of the third word contains the length of
+                # the share name string.
+                
+                length = self.str2num(1, data[8])
+                
+                # The string follows in the next word.
+                share_name = data[12:12+length]
+                
+                # The protected flag follows the last byte in the string.
+                protected = data[12+length]
+                
+                print 'Share "%s" (%s) available' % \
+                    (share_name, ["unprotected", "protected"][protected])
+            
+            elif about & 0xffff == 0x0003:
+            
+                # Share withdrawn
+                
+                # Ignore the second word
+                
+                # The first byte of the third word contains the length of
+                # the share name string.
+                
+                length = self.str2num(1, data[8])
+                
+                # The string follows in the next word.
+                share_name = data[12:12+length]
+                
+                # The protected flag follows the last byte in the string.
+                protected = data[12+length]
+                
+                print 'Share "%s" (%s) withdrawn' % \
+                    (share_name, ["unprotected", "protected"][protected])
+        
+        elif about & 0xffff0000 == 0x00050000:
+        
+            # A client
+            
+            if about & 0xffff == 0x0001:
+            
+                # Startup
+                print "Starting up client"
+            
+            elif about & 0xffff == 0x0002:
+            
+                # Startup broadcast
+                
+                # Ignore the second word
+                
+                # The first byte of the third word contains the length of
+                # the share name string.
+                
+                length = self.str2num(1, data[8])
+                
+                # The string follows in the next word.
+                client_name = data[12:12+length]
+                
+                c = 12 + length
+                
+                if c % 4 != 0:
+                
+                    c = c + 4 - (c % 4)
+                
+                # The word following the client name contains some
+                # information about the client.
+                info = self.str2num(4, data[c:c+4])
+                
+                print "Startup client: %s %08x" % (client_name, info)
+            
+            elif about & 0xffff == 0x0003:
+            
+                # Query message (direct)
+                
+                # Ignore the second word
+                
+                # The first byte of the third word contains the length of
+                # the share name string.
+                
+                length = self.str2num(1, data[8])
+                
+                # The string follows in the next word.
+                client_name = data[12:12+length]
+                
+                c = 12 + length
+                
+                if c % 4 != 0:
+                
+                    c = c + 4 - (c % 4)
+                
+                # The word following the client name contains some
+                # information about the client.
+                info = self.str2num(4, data[c:c+4])
+                
+                print "Query: %s %08x" % (client_name, info)
+            
+            elif about & 0xffff == 0x0004:
+            
+                # Availability broadcast
+                
+                # Ignore the second word
+                
+                # The first byte of the third word contains the length of
+                # the share name string.
+                
+                length = self.str2num(1, data[8])
+                
+                # The string follows in the next word.
+                client_name = data[12:12+length]
+                
+                c = 12 + length
+                
+                if c % 4 != 0:
+                
+                    c = c + 4 - (c % 4)
+                
+                # The word following the client name contains some
+                # information about the client.
+                info = self.str2num(4, data[c:c+4])
+                
+                print "Client available: %s %08x" % (client_name, info)
+    
     
     def broadcast_share(self, name, event, protected = 0, delay = 2):
     
@@ -544,3 +757,7 @@ class Server:
         # Remove the thread and the event from their respective dictionaries.
         del self.shares[name]
         del self.events[name]
+    
+    def read_port(self, ports):
+    
+        self.access.read_port(ports)

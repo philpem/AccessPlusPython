@@ -6,11 +6,16 @@
 
 16: Share unprotected HardDisc4
 00010002 00010000 00010009 64726148 : ............Hard
+                        ^^
+                        name length
 63736944 00000034                   : Disc4...
 
 22: Don't share unprotected HardDisc4
 00010003 00010000 00010009 64726148 : ............Hard
+                           ^^^^^^^^-...
 63736944 00000034                   : Disc4...
+^^^^^^^^-------^^
+               name
 
 27: Share protected HardDisc4
 00010002 00010000 00010009 64726148 : ............Hard
@@ -46,3 +51,45 @@ then usual polling behaviour:
 44:
 00050004 00010000 00040006 6b616562 : ............beak
 9f897265 00003eb9                   : er...>..
+
+
+
+If we start a test client and stop it, we receive the following blocks
+sent explicitly to our machine which look like they are announcing the
+availability of the other machine in a similar manner to the startup
+sequence:
+
+0:
+00050001 00000000                   : ........
+
+26:
+00050001 00000000                   : ........
+
+31:
+00050001 00000000                   : ........
+
+
+If we run our test client, the other machine responds with the following
+block, repeated many times, sent to our machine.
+
+Polling data:
+00050003 00010000 00040006 6b616562 : ............beak
+
+cd557265 00003eb9                   : erU..>..
+
+
+
+Noted that, if we run our test client, it interferes with the operation
+of the shares on the other machine. We need to determine the machine
+information in the blocks being sent.
+
+It is possible that the first word is a command/request and the station
+number, so:
+
+00050004 is about station 4 (192.168.0.4 - our machine)
+
+We sometimes receive a message
+
+00050003 ...
+
+which may be about station 3 (the other machine)
