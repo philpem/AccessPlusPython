@@ -307,29 +307,24 @@ class Access:
         
         s = self.ports[32770]
         
-        # Create the first string to send.
-        data = \
-            self.number(4, 0x00010001) + \
-            self.number(4, 0x00000000)
+        # Create the first message to send.
+        data = [0x00010001, 0x00000000]
         
-        s.sendto(data, (self.broadcast, 32770))
+        self._send_list(data, s, (self.broadcast, 32770))
         
-        # Create the second string to send.
-        data = \
-            self.number(4, 0x00050001) + \
-            self.number(4, 0x00000000)
+        # Create the second message to send.
+        data = [0x00050001, 0x00000000]
         
-        s.sendto(data, (self.broadcast, 32770))
+        self._send_list(data, s, (self.broadcast, 32770))
         
         # Create the host broadcast string.
         data = \
-            self.number(4, 0x00050002) + \
-            self.number(4, 0x00010000) + \
-            self.number(4, 0x00040000 | len(self.hostname)) + \
-            self.pad_hostname + \
-            self.number(4, 0x00003eb9)
+        [
+            0x00050002, 0x00010000, 0x00040000 | len(self.hostname),
+            self.hostname, self.identity
+        ]
         
-        s.sendto(data, (self.broadcast, 32770))
+        self._send_list(data, s, (self.broadcast, 32770))
     
     def broadcast_poll(self, event, delay = 20):
     
@@ -347,17 +342,16 @@ class Access:
         
         # Create a string to send.
         data = \
-            self.number(4, 0x00050004) + \
-            self.number(4, 0x00010000) + \
-            self.number(4, 0x00040000 | len(self.hostname)) + \
-            self.pad_hostname + \
-            self.number(4, 0x00003eb9)
+        [
+            0x00050004, 0x00010000, 0x00040000 | len(self.hostname),
+            self.hostname, self.identity
+        ]
         
         while 1:
         
             t0 = time.time()
             
-            s.sendto(data, (self.broadcast, 32770))
+            self._send_list(data, s, (self.broadcast, 32770))
             
             while int(time.time() - t0) < delay:
             
@@ -408,7 +402,7 @@ class Access:
                 share_name = data[12:12+length]
                 
                 # The protected flag follows the last byte in the string.
-                protected = data[12+length]
+                protected = self.str2num(1, data[12+length])
                 
                 print 'Share "%s" (%s) available' % \
                     (share_name, ["unprotected", "protected"][protected])
@@ -428,9 +422,29 @@ class Access:
                 share_name = data[12:12+length]
                 
                 # The protected flag follows the last byte in the string.
-                protected = data[12+length]
+                protected = self.str2num(1, data[12+length])
                 
                 print 'Share "%s" (%s) withdrawn' % \
+                    (share_name, ["unprotected", "protected"][protected])
+            
+            elif about & 0xffff == 0x0004:
+            
+                # Share periodic broadcast
+                
+                # Ignore the second word
+                
+                # The first byte of the third word contains the length of
+                # the share name string.
+                
+                length = self.str2num(1, data[8])
+                
+                # The string follows in the next word.
+                share_name = data[12:12+length]
+                
+                # The protected flag follows the last byte in the string.
+                protected = self.str2num(1, data[12+length])
+                
+                print 'Share "%s" (%s) available' % \
                     (share_name, ["unprotected", "protected"][protected])
         
         elif about & 0xffff0000 == 0x00050000:
@@ -545,11 +559,12 @@ class Access:
         s = self.ports[32770]
         
         data = \
-            self.number(4, 0x00010002) + \
-            self.number(4, 0x00010000) + \
-            self.number(4, 0x00010000 | len(name)) + \
-            pad_name + \
-            self.number(4, 0x00000034 | ((protected & 1) << 8))
+        [
+            0x00010002, 0x00010000, 0x00010000 | len(name),
+            name + chr(protected & 1)
+        ]
+        
+        self._send_list(data, s, (self.broadcast, 32770))
         
         # Advertise the share on the share socket.
         
@@ -561,16 +576,13 @@ class Access:
         s = self.ports[49171]
         
         # Create a string to send.
-        data = \
-            self.number(4, 0x00000046) + \
-            self.number(4, 0x00000013) + \
-            self.number(4, 0x00000000)
+        data = [0x00000046, 0x00000013, 0x00000000]
         
         while 1:
         
             t0 = time.time()
             
-            s.sendto(data, (self.broadcast, 49171))
+            self._send_list(data, s, (self.broadcast, 49171))
             
             while int(time.time() - t0) < delay:
             
@@ -595,11 +607,10 @@ class Access:
         s = self.ports[32770]
         
         data = \
-            self.number(4, 0x00010003) + \
-            self.number(4, 0x00010000) + \
-            self.number(4, 0x00010000 | len(name)) + \
-            pad_name + \
-            self.number(4, 0x00000034 | ((protected & 1) << 8))
+        [
+            0x00010003, 0x00010000, 0x00010000 | len(name),
+            name + chr(protected & 1)
+        ]
     
     def send_query(self, host):
     
@@ -612,13 +623,12 @@ class Access:
         
         # Create a string to send.
         data = \
-            self.number(4, 0x00050003) + \
-            self.number(4, 0x00010000) + \
-            self.number(4, 0x00040000 | len(self.hostname)) + \
-            self.pad_hostname + \
-            self.number(4, 0x00003eb9)
+        [
+            0x00050003, 0x00010000, 0x00040000 | len(self.hostname),
+            self.hostname, self.identity
+        ]
         
-        s.sendto(data, (host, 32770))
+        self._send_list(data, s, (host, 32770))
         
         self.read_port([32770, 32771, 49171])
 
