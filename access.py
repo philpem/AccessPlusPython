@@ -27,6 +27,10 @@ SEND_SIZE = 16384
 SEND_PPUT_SIZE = 16384
 SEND_GET_SIZE = 4096
 
+# Local user permissions
+USER_READ = os.path.stat.S_IRUSR
+USER_WRITE = os.path.stat.S_IWUSR
+
 # Local directory permissions for newly created directories
 DIR_EXEC = os.path.stat.S_IFDIR | \
     os.path.stat.S_IXUSR | \
@@ -37,12 +41,12 @@ DIR_EXEC = os.path.stat.S_IFDIR | \
 FILE_ATTR = os.path.stat.S_IFREG
 
 # Protected share read and write masks
-PROTECTED_READ  = 0004
-PROTECTED_WRITE = 0002
+PROTECTED_READ  = os.path.stat.S_IROTH
+PROTECTED_WRITE = os.path.stat.S_IWOTH
 
 # Unprotected share read and write masks
-UNPROTECTED_READ  = 0444
-UNPROTECTED_WRITE = 0222
+UNPROTECTED_READ  = USER_READ | os.path.stat.S_IRGRP | os.path.stat.S_IROTH
+UNPROTECTED_WRITE = USER_WRITE | os.path.stat.S_IWGRP | os.path.stat.S_IWOTH
 
 # Standard sizes of objects on a RISC OS style filing system
 
@@ -72,6 +76,34 @@ at = string.find(Hostname, ".")
 if at != -1:
 
     Hostname = Hostname[:at]
+
+# Define the share name to be used for incoming print jobs.
+
+def print_share_name(hostaddr):
+
+    # Construct a printer share name from the host address.
+    value = 0
+    shift = 24
+    
+    while shift >= 0:
+    
+        at = string.rfind(hostaddr, ".")
+        
+        # Even if a "." is not found then the following expression still
+        # works as the remaining string (hostaddr[0:]) will be read.
+        value = value | (int(hostaddr[at+1:]) << shift)
+        shift = shift - 8
+        hostaddr = hostaddr[:at]
+    
+    return string.upper("_S%x" % value)
+
+# The print share name
+
+PrintShareName = print_share_name(Hostaddr)
+
+# The directory to be used for incoming print jobs is defined on a per
+# Peer basis.
+
 
 
 class Common:
@@ -1585,7 +1617,7 @@ class Share(Ports, Translate):
     def __init__(self, name, directory, mode, delay, present, filetype,
                  file_handler):
     
-        # Call the initialisation method of the base classes.
+        # Call the initialisation methods of the base classes.
         Ports.__init__(self)
         Translate.__init__(self, directory = directory)
         
@@ -1618,6 +1650,9 @@ class Share(Ports, Translate):
         self.present = present
         self.filetype = filetype
         self.delay = delay
+        
+        # The filetype of the share directory itself.
+        self.share_type = 0xfcd
         
         # Convert the share's mode mask to a file attribute mask.
         self.access_attr = self.to_riscos_access(mode = mode)
@@ -1769,7 +1804,7 @@ class Share(Ports, Translate):
             cs = self.to_riscos_time()
             
             filetype_word, date_word = \
-                self._make_riscos_filetype_date(0xfcd, cs)
+                self._make_riscos_filetype_date(self.share_type, cs)
             
             # Mask the access attributes of this file with the share's access
             # mask.
@@ -2412,8 +2447,6 @@ class Share(Ports, Translate):
             parent_path, check_mode = self.write_mask
             )
         
-        print write_path, rest
-        
         # Return an error value if it can't.
         if rest != []: return None, write_path
         
@@ -2458,13 +2491,14 @@ class Share(Ports, Translate):
         return [ filetype, date, length, access_attr, object_type,
                  handle ], path
     
-    
+
 
 
 class RemoteShare(Ports, Translate):
 
     def __init__(self, name, host, messages):
     
+        # Call the initialisation methods of the base classes.
         Ports.__init__(self)
         Translate.__init__(self)
         
@@ -2898,7 +2932,13 @@ class RemoteShare(Ports, Translate):
                 
                 # Prefix the path in the share with the share name and append
                 # the filename to obtain a full share path to the object.
-                ros_path = ros_path + "." + ros_file
+                if ros_path != "":
+                
+                    ros_path = ros_path + "." + ros_file
+                
+                else:
+                
+                    ros_path = ros_file
                 
                 full_path = self.name + "." + ros_path
             
@@ -3132,7 +3172,13 @@ class RemoteShare(Ports, Translate):
                 
                 # Prefix the path in the share with the share name and append
                 # the filename to obtain a full share path to the object.
-                ros_path = ros_path + "." + ros_file
+                if ros_path != "":
+                
+                    ros_path = ros_path + "." + ros_file
+                
+                else:
+                
+                    ros_path = ros_file
                 
                 full_path = self.name + "." + ros_path
             
@@ -3449,16 +3495,26 @@ class RemoteShare(Ports, Translate):
 
 
 
+class PrinterError(Exception):
+
+    pass
+
 class Printer(Ports):
 
-    def __init__(self, name, description, delay):
+    def __init__(self, name, directory, defn, description, delay, command):
     
         # Call the initialisation method of the base classes.
         Ports.__init__(self)
         
         self.name = name
+        self.directory = directory
+        self.defn = defn
         self.description = description
         self.delay = delay
+        self.command = command
+        
+        # Ensure that the directory structure is correctly set up.
+        self.setup()
         
         # Create an event to use to inform the share that it must be
         # removed.
@@ -3472,6 +3528,48 @@ class Printer(Ports):
         
         # Start the thread.
         self.thread.start()
+    
+    def setup(self):
+    
+        # Copy the printer definition file into the printer share directory.
+        try:
+        
+            new_path = os.path.join(self.directory, self.name) + \
+                os.extsep + "fc6"
+            
+            open(new_path, "wb").write(open(self.defn, "rb").read())
+        
+        except IOError:
+        
+            raise PrinterError, "Definition file not found."
+        
+        # Create the RemQueue and RemSpool directories inside the printer
+        # share directory.
+        try:
+        
+            os.chmod(new_path, UNPROTECTED_READ | UNPROTECTED_WRITE | FILE_ATTR)
+            
+            if not os.path.isdir(os.path.join(self.directory, "RemQueue")):
+            
+                os.mkdir(os.path.join(self.directory, "RemQueue"))
+            
+            os.chmod(
+                os.path.join(self.directory, "RemQueue"),
+                DIR_EXEC | UNPROTECTED_READ | USER_WRITE
+                )
+            
+            if not os.path.isdir(os.path.join(self.directory, "RemSpool")):
+            
+                os.mkdir(os.path.join(self.directory, "RemSpool"))
+            
+            os.chmod(
+                os.path.join(self.directory, "RemSpool"),
+                DIR_EXEC | UNPROTECTED_READ | USER_WRITE
+                )
+        
+        except OSError:
+        
+            raise PrinterError, "Failed to create printer share subdirectories."
     
     def broadcast_printer(self):
     
@@ -3498,27 +3596,22 @@ class Printer(Ports):
         
         self._send_list(data, s, (Broadcast_addr, 32770))
         
-        # Advertise the share on the share socket.
-        
-        if not self.broadcasters.has_key(49171):
-        
-            print "No socket to use for port %i" % 49171
-            return
-        
-        s = self.broadcasters[49171]
-        
-        # Create a string to send.
-        data = [0x00000046, 0x00000013, 0x00000000]
+        data = \
+        [
+            0x00020004, 0x00010000,
+            (len(self.description) << 16) | len(self.name),
+            self.name + self.description
+        ]
         
         while 1:
         
-            self._send_list(data, s, (Broadcast_addr, 49171))
-            
             t0 = time.time()
             
             while (time.time() - t0) < self.delay:
             
                 if self.event.isSet(): return
+            
+            self._send_list(data, s, (Broadcast_addr, 32770))
         
         # Broadcast that the share has now been removed.
         
@@ -3526,22 +3619,22 @@ class Printer(Ports):
         
         data = \
         [
-            0x00010003, 0x00010000, 0x00010000 | len(self.name),
+            0x00020003, 0x00010000, 0x00010000 | len(self.name),
             self.name + chr(self.protected & 1)
         ]
+        
+        self._send_list(data, s, (Broadcast_addr, 32770))
     
-
 
 
 
 class Peer(Ports):
 
-    def __init__(self, debug = 1):
+    def __init__(self):
     
         # Call the initialisation method of the base classes.
         Ports.__init__(self)
         
-        self.debug = 1
         # ---------------------------------------------------------------------
         # Socket configuration
         
@@ -3630,7 +3723,69 @@ class Peer(Ports):
     
     def create_shares(self):
     
-        # Compile a list of paths to check for the access.cfg file.
+        """creates_shares(self)
+        
+        Create shares on the local machine from a list in the .access
+        configuration file. This file has the following format:
+        
+        Directory/disc shares
+        
+        Each line of the .access file describing directory/disc shares must
+        conform to the following syntax:
+        
+        <share> <path> <mode> <delay> <translation> <filetype>
+        
+        The "share" parameter is the name by which other clients
+        refer to the contents of the shared directory.
+        
+        The "path" is the path on the local filesystem which can be
+        navigated by other clients.
+        
+        The "mode" is an octal value describing a mask to apply to
+        the files and directories in the shared directory. This
+        is loosely translated into a value for the protected flag
+        which is understood by RISC OS clients.
+        
+        The "delay" parameter sets the delay between availability
+        broadcasts on the network. This can be disabled by supplying
+        the value "off" (without quotes) or set to the default value
+        using the value "default".
+        
+        The "translation" parameter is either "suffix" or "truncate"
+        indicating that filename suffixes are either to be presented
+        to other clients or truncated.
+        
+        A final parameter is the default filetype to be used for
+        files whose type cannot be determined using the MimeMap
+        file. This should take the form of a twelve bit integer in
+        Python or C hexadecimal form, e.g. 0xfff.
+        
+        myshare /home/user/myfile 0644 off truncate 0xffd
+        
+        Printer shares
+        
+        When the share is named "<Printer>" (without quotes) in the .access
+        file, a share will be created with the appropriate name for the
+        printer share on this machine and the availability of the
+        corresponding local printer will be broadcast. All printer shares
+        start with this pseudonym.
+        
+        Each line describing a printer must conform to the following syntax:
+        
+        "<Printer>" <name> <path> <definition file> <delay> <filetype> \
+        <description> <command>
+        
+        Here, the share name is predetermined and the path must point to
+        a world writable directory. The "delay", "translation" and "filetype"
+        parameters are as described above.
+        
+        The "description" parameter is a quoted string containing a short
+        description of the printer.
+        
+        The "command" parameter is a quoted string containing a suitable
+        command for performing the printing of the files in the printer share.
+        """
+        # Compile a list of paths to check for the .access file.
         
         # Start with the current directory.
         paths = [""]
@@ -3667,6 +3822,8 @@ class Peer(Ports):
             f.close()
         
         # Read the lines found.
+        quoted = 0
+        
         for line in lines:
         
             # Strip leading and trailing whitespace.
@@ -3680,7 +3837,15 @@ class Peer(Ports):
             
             for c in s:
             
-                if c not in string.whitespace:
+                if c == '"':
+                
+                    quoted = 1 - quoted
+                
+                elif c not in string.whitespace:
+                
+                    current = current + c
+                
+                elif c in string.whitespace and quoted == 1:
                 
                     current = current + c
                 
@@ -3693,43 +3858,17 @@ class Peer(Ports):
             
                 values.append(current)
             
-            # The values correspond to various fields corresponding to the
-            # following syntax:
-            #
-            # <share> <path> <mode> <delay> <translation> <filetype>
-            #
-            # The "share" parameter is the name by which other clients
-            # refer to the contents of the shared directory.
-            #
-            # The "path" is the path on the local filesystem which can be
-            # navigated by other clients.
-            #
-            # The "mode" is an octal value describing a mask to apply to
-            # the files and directories in the shared directory. This
-            # is loosely translated into a value for the protected flag
-            # which is understood by RISC OS clients.
-            #
-            # The "delay" parameter sets the delay between availability
-            # broadcasts on the network. This can be disabled by supplying
-            # the value "off" (without quotes) or set to the default value
-            # using the value "default".
-            #
-            # The "translation" parameter is either "suffix" or "truncate"
-            # indicating that filename suffixes are either to be presented
-            # to other clients or truncated.
-            #
-            # A final parameter is the default filetype to be used for
-            # files whose type cannot be determined using the MimeMap
-            # file. This should take the form of a twelve bit integer in
-            # Python or C hexadecimal form, e.g. 0xfff.
-            #
-            # myshare /home/user/myfile 0644 off truncate 0xffd
+            if quoted == 1:
             
-            if len(values) == 6:
+                sys.stderr.write(
+                    "Quotes do not match: %s\n" % line
+                    )
             
-                # Try to create this share.
+            elif len(values) == 6 and values[0] != "<Printer>":
+            
                 name, path, mode, delay, present, filetype = values[0:6]
                 
+                # Try to create this share.
                 try:
                 
                     self.add_share(name, path, mode, delay, present, filetype)
@@ -3738,7 +3877,24 @@ class Peer(Ports):
                 
                     sys.stderr.write("Could not add share: %s\n" % name)
                     sys.stderr.flush()
+            
+            elif len(values) == 8 and values[0] == "<Printer>":
+            
+                name, path, defn, delay, filetype, description, command = \
+                    values[1:8]
                 
+                # Try to create this share.
+                try:
+                
+                    self.add_printer(
+                        name, path, defn, description, delay, filetype, command
+                        )
+                
+                except ShareError:
+                
+                    sys.stderr.write("Could not add printer: %s\n" % name)
+                    sys.stderr.flush()
+            
             elif len(values) > 0:
             
                 sys.stderr.write(
@@ -4198,6 +4354,8 @@ class Peer(Ports):
     
     def _read_poll_socket(self, data, address):
     
+        self.log("received", data, address)
+        
         host = address[0]
         
         # Check the first word of the response to determine what the
@@ -4535,7 +4693,7 @@ class Peer(Ports):
     
     def _read_listener_socket(self, data, address):
     
-        print "From: %s:%i" % address
+        self.log("received", data, address)
         
         host = address[0]
         
@@ -4639,10 +4797,7 @@ class Peer(Ports):
                 elif ros_path == "":
                 
                     # Reply with an error message.
-                    self._send_list(
-                        ["E"+reply_id, 0x163ac, "Shared disc not available."],
-                        _socket, address
-                        )
+                    msg = ["E"+reply_id, 0x163ac, "Shared disc not available."]
                 
                 else:
                 
@@ -5241,8 +5396,6 @@ class Peer(Ports):
                 # Write the message header.
                 header = ["S"+reply_id, len(file_data), 0xc]
                 
-                self.log("sent", header, address)
-                
                 # Encode the header, adding padding if necessary.
                 header = self._encode(header)
                 
@@ -5250,8 +5403,6 @@ class Peer(Ports):
                 # containing the amount of data sent and the new
                 # offset into the file being read.
                 trailer = ["B"+reply_id, len(file_data), new_pos]
-                
-                self.log("sent", trailer, address)
                 
                 # Encode the trailer, adding padding if necessary.
                 trailer = self._encode(trailer)
@@ -5263,6 +5414,8 @@ class Peer(Ports):
             
                 # Reply with an error message.
                 msg = self._encode(["E"+reply_id, 0x100d6, "Not found"])
+            
+            self.log("sent", msg, address)
             
             # Send the message.
             _socket.sendto(msg, address)
@@ -5526,10 +5679,12 @@ class Peer(Ports):
         try:
         
             # Mode value must be valid octal.
-            mode = self.coerce(
-                string.atoi, (mode, 8), (ValueError,), ShareError,
-                "Invalid octal value for mode mask: %s" % mode
-                )
+            if type(mode) == types.StringType:
+            
+                mode = self.coerce(
+                    string.atoi, (mode, 8), (ValueError,), ShareError,
+                    "Invalid octal value for mode mask: %s" % mode
+                    )
             
             # Delay value must be decimal, "off" or "default".
             if delay == "default":
@@ -5540,7 +5695,7 @@ class Peer(Ports):
             
                 pass
             
-            else:
+            elif type(delay) == types.StringType:
             
                 delay = self.coerce(
                     float, (delay,), (ValueError,), ShareError,
@@ -5548,10 +5703,12 @@ class Peer(Ports):
                     )
             
             # Filetype value must be valid hexadecimal.
-            filetype = self.coerce(
-                string.atoi, (filetype, 16), (ValueError,), ShareError,
-                "Invalid hexadecimal value for filetype: %s" % filetype
-                )
+            if type(filetype) == types.StringType:
+            
+                filetype = self.coerce(
+                    string.atoi, (filetype, 16), (ValueError,), ShareError,
+                    "Invalid hexadecimal value for filetype: %s" % filetype
+                    )
             
             share = Share(
                 name, directory, mode, delay, present, filetype,
@@ -5591,22 +5748,66 @@ class Peer(Ports):
         # Remove the thread and the event from their respective dictionaries.
         del self.shares[(name, Hostaddr)]
     
-    def add_printer(self, name, description = "", delay = DEFAULT_PRINTER_DELAY):
+    def add_printer(self, name, directory, defn, description = "",
+                    delay = DEFAULT_PRINTER_DELAY, filetype = DEFAULT_FILETYPE,
+                    command = "lpr"):
     
-        """add_printer(self, name, description = "",
-                       delay = DEFAULT_PRINTER_DELAY)
+        """add_printer(self, name, directory, defn, description = "",
+                       delay = DEFAULT_PRINTER_DELAY,
+                       filetype = DEFAULT_FILETYPE, command = "lpr")
         
         Make the named printer available to other hosts.
         """
         
         if self.printers.has_key((name, Hostaddr)):
         
-            print "Printer is already available: %s" % name
+            sys.stderr.write("Printer is already available: %s\n" % name)
             return
         
-        printer = Printer(name, description, delay)
+        try:
         
+            # Delay value must be decimal, "off" or "default".
+            if delay == "default":
+            
+                delay = DEFAULT_SHARE_DELAY
+            
+            elif delay == "off":
+            
+                pass
+            
+            elif type(delay) == types.StringType:
+            
+                delay = self.coerce(
+                    float, (delay,), (ValueError,), PrinterError,
+                    "Invalid delay value: %s" % delay
+                    )
+            
+            printer = Printer(
+                name, directory, defn, description, delay, command
+                )
+        
+        except PrinterError:
+        
+            sys.stderr.write("Failed to add printer: %s\n" % name)
+            return
+        
+        # Add the printer to the dictionary of active printers.
         self.printers[(name, Hostaddr)] = printer
+        
+        # If there is not currently a share for accepting print jobs then
+        # create one.
+        
+        if not self.shares.has_key((PrintShareName, Hostaddr)):
+        
+            #share = PrinterShare(
+            #    name, PrintShareName, directory, 0666, delay,
+            #    "truncate", filetype, self.file_handler
+            #    )
+            #
+            #self.shares[(PrintShareName, Hostaddr)] = share
+            self.add_share(
+                PrintShareName, directory, 0666, delay, "truncate", filetype
+                )
     
     def remove_printer(self, name):
     
