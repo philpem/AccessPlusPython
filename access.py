@@ -2526,7 +2526,8 @@ class RemoteShare(Ports, Translate):
         
         else:
         
-            print 'Successfully opened "%s"' % name
+            pass
+            #print 'Successfully opened "%s"' % name
         
         # Return the information on the item.
         return self._read_file_info(data)
