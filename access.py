@@ -19,13 +19,17 @@ between_epochs = ((365 * 70) + 17) * 24 * 360000
 
 # Buffer size configuration
 
-RECV_SIZE = 16384
-RECV_PUT_SIZE = 8192
+# Amounts we can receive (the other client can send)
+RECV_SIZE = 32768
+RECV_PPUT_SIZE = 8192
 RECV_GET_SIZE = 8192
+RECV_PGET_SIZE = 16384
 
+# Amounts the remote client can receive
 SEND_SIZE = 16384
-SEND_PPUT_SIZE = 16384
 SEND_GET_SIZE = 4096
+SEND_PGET_SIZE = 8192
+SEND_PPUT_SIZE = 16384
 
 # Local user permissions
 USER_READ = os.path.stat.S_IRUSR
@@ -68,6 +72,9 @@ Hostaddr = socket.gethostbyname(Hostname)
 # Construct a broadcast address.
 at = string.rfind(Hostaddr, ".")
 Broadcast_addr = Hostaddr[:at] + ".255"
+
+# Define a string to represent the local subnet.
+Subnet = Hostaddr[:at]
 
 # Use just the hostname from the full hostname retrieved.
 
@@ -501,6 +508,27 @@ class Ports(Common):
 #        
 #        return string.join(output, "")
     
+    def _recvfrom(self, s, bufsize):
+    
+        """string, address = _recvfrom(self, socket, bufsize)
+        
+        Receive data of maximum length given by "bufsize" from the socket in
+        a string and determine the address it originated from, filtering out
+        data from machines not on the local subnet.
+        """
+        
+        data, addr = s.recvfrom(bufsize)
+        
+        host = socket.gethostbyname(addr[0])
+        
+        if string.find(host, Subnet) == 0:
+        
+            return data, addr
+        
+        else:
+        
+            return None, None
+    
     def _send_list(self, l, s, to_addr):
     
         """send_list(self, list, socket, to_addr)
@@ -808,9 +836,15 @@ class Messages(Common):
         # that entry in the dictionary if it exists.
         key = data[1:4]
         
-        if key != "" and self.messages.has_key((host, key)):
+        if key != "":
         
-            self.messages[(host, key)].append(data)
+            try:
+            
+                self.messages[(host, key)].append(data)
+            
+            except KeyError:
+            
+                pass
     
     def remove(self, (host, data)):
     
@@ -818,9 +852,15 @@ class Messages(Common):
         # that entry in the dictionary if it exists.
         key = data[1:4]
         
-        if key != "" and self.messages.has_key((host, key)):
+        if key != "":
         
-            self.messages[(host, key)].remove(data)
+            try:
+            
+                self.messages[(host, key)].remove(data)
+            
+            except KeyError:
+            
+                pass
     
     def add_entry(self, host, new_id):
     
@@ -895,11 +935,14 @@ class ConfigError(Exception):
 
 class File:
 
-    def __init__(self, path, share):
+    def __init__(self, path, share, user):
     
         self.pieces = []
         self.ptr = 0
         self.path = path
+        
+        # Record the current user of this file (their host).
+        self.user = user
         
         # The share the file is stored in.
         self.share = share
@@ -1112,10 +1155,10 @@ class Unused(Common):
         
         try:
         
-            data, address = s.recvfrom(RECV_SIZE)
+            data, address = self._recvfrom(s, RECV_SIZE)
             
-            lines = ["From: %s:%i" % address]
-            lines = lines + self.interpret(data)
+            #lines = ["From: %s:%i" % address]
+            #lines = lines + self.interpret(data)
         
         except socket.error:
         
@@ -1791,7 +1834,7 @@ class Share(Ports, Translate):
         # list of names.
         return next_path, names[1:]
     
-    def open_path(self, ros_path):
+    def open_path(self, ros_path, host):
     
         self.log("comment", "Original path: %s" % ros_path, "")
         
@@ -1858,7 +1901,7 @@ class Share(Ports, Translate):
             # Keep this handle for possible later use.
             if not self.file_handler.has_key(handle):
             
-                self.file_handler[handle] = File(path, self)
+                self.file_handler[handle] = File(path, self, host)
             
             else:
             
@@ -1866,8 +1909,16 @@ class Share(Ports, Translate):
                 # is in use.
                 fh = self.file_handler[handle]
                 
-                # Use the file object's length, if possible.
-                length = fh.length()
+                if fh.user == host:
+                
+                    # Use the file object's length, if possible.
+                    length = fh.length()
+                
+                else:
+                
+                    # If the current user is not the one recorded then
+                    # return an error.
+                    return None, path
             
             return [ filetype, date, length, access_attr, object_type,
                      handle ], path
@@ -1976,7 +2027,7 @@ class Share(Ports, Translate):
             # Keep this handle for possible later use.
             if not self.file_handler.has_key(handle):
             
-                self.file_handler[handle] = File(path, self)
+                self.file_handler[handle] = File(path, self, host)
             
             else:
             
@@ -2777,7 +2828,7 @@ class RemoteShare(Ports, Translate):
         pos = 0
         
         # Request packets smaller than the receive buffer size.
-        packet_size = RECV_GET_SIZE
+        packet_size = RECV_PGET_SIZE
         
         start_addr = 0
         
@@ -4099,7 +4150,7 @@ class Peer(Ports):
                 # Note that the length parameter passed is the buffer size the remote
                 # client expects. However, we request packets which are small
                 # enough for our receive buffer.
-                packet_size = min(RECV_PUT_SIZE, end - pos)
+                packet_size = min(RECV_PPUT_SIZE, end - pos)
                 
                 # Construct a list to send to the remote client.
                 #msg = ["w", pos, 0, pos + packet_size]
@@ -4215,7 +4266,7 @@ class Peer(Ports):
         pos = start
         
         # Determine the amount of information we can send.
-        amount = min(length, SEND_GET_SIZE)
+        amount = min(length, SEND_PGET_SIZE)
         
         end = start + length
         
@@ -4269,7 +4320,7 @@ class Peer(Ports):
                 
                     # Read the header.
                     pos = start + self.str2num(4, data[4:8])
-                    amount = min(end - pos, SEND_GET_SIZE)
+                    amount = min(end - pos, SEND_PGET_SIZE)
                     
                     if pos >= end:
                     
@@ -4327,9 +4378,11 @@ class Peer(Ports):
         try:
         
             s = self.ports[32770]
-            data, address = s.recvfrom(RECV_SIZE)
+            data, address = self._recvfrom(s, RECV_SIZE)
             
-            self._read_poll_socket(data, address)
+            if data:
+            
+                self._read_poll_socket(data, address)
         
         except (KeyError, socket.error):
         
@@ -4340,9 +4393,11 @@ class Peer(Ports):
         try:
         
             s = self.broadcasters[32770]
-            data, address = s.recvfrom(RECV_SIZE)
+            data, address = self._recvfrom(s, RECV_SIZE)
             
-            self._read_poll_socket(data, address)
+            if data:
+            
+                self._read_poll_socket(data, address)
         
         except (KeyError, socket.error):
         
@@ -4666,9 +4721,11 @@ class Peer(Ports):
         try:
         
             s = self.ports[32771]
-            data, address = s.recvfrom(RECV_SIZE)
+            data, address = self._recvfrom(s, RECV_SIZE)
             
-            self._read_listener_socket(data, address)
+            if data:
+            
+                self._read_listener_socket(data, address)
         
         except (KeyError, socket.error):
         
@@ -4679,9 +4736,11 @@ class Peer(Ports):
         try:
         
             s = self.broadcasters[32771]
-            data, address = s.recvfrom(RECV_SIZE)
+            data, address = self._recvfrom(s, RECV_SIZE)
             
-            self._read_listener_socket(data, address)
+            if data:
+            
+                self._read_listener_socket(data, address)
         
         except (KeyError, socket.error):
         
@@ -4696,14 +4755,6 @@ class Peer(Ports):
         self.log("received", data, address)
         
         host = address[0]
-        
-        lines = self.interpret(data)
-        
-        for line in lines:
-        
-            print line
-        
-        print
     
     def read_share_socket(self):
     
@@ -4711,10 +4762,12 @@ class Peer(Ports):
         try:
         
             s = self.ports[49171]
-            data, address = s.recvfrom(RECV_SIZE)
+            data, address = self._recvfrom(s, RECV_SIZE)
             
-            self.log("comment", "Listening socket", "")
-            self._read_share_socket(s, data, address)
+            if data:
+            
+                self.log("comment", "Listening socket", "")
+                self._read_share_socket(s, data, address)
         
         except socket.error:
         
@@ -4725,10 +4778,12 @@ class Peer(Ports):
         try:
         
             s = self.broadcasters[49171]
-            data, address = s.recvfrom(RECV_SIZE)
+            data, address = self._recvfrom(s, RECV_SIZE)
             
-            self.log("comment", "Broadcasting socket", "")
-            self._read_share_socket(s, data, address)
+            if data:
+            
+                self.log("comment", "Broadcasting socket", "")
+                self._read_share_socket(s, data, address)
         
         except socket.error:
         
@@ -4784,7 +4839,11 @@ class Peer(Ports):
                 try:
                 
                     share = self.shares[(share_name, Hostaddr)]
-                    info, path = share.open_path(ros_path)
+                    
+                    # Pass the name of the host making this request as this
+                    # information will be used to prevent other users from
+                    # modifying this file while it is in use.
+                    info, path = share.open_path(ros_path, host)
                 
                 except KeyError:
                 
@@ -5071,7 +5130,9 @@ class Peer(Ports):
                 
                     fh = self.file_handler[handle]
                     
-                    fh.close()
+                    if fh.user == host:
+                    
+                        fh.close()
                     
                     del self.file_handler[handle]
                     
@@ -5104,6 +5165,8 @@ class Peer(Ports):
                 try:
                 
                     fh = self.file_handler[handle]
+                    
+                    if fh.user != host: raise KeyError
                     
                     path = fh.path
                     
@@ -5164,54 +5227,59 @@ class Peer(Ports):
                 # Translate the handle into a path.
                 fh = self.file_handler[handle]
                 
-                path = fh.path
-                length = fh.length()
+                if fh.user == host:
                 
-                self.log("comment", "", "")
-                self.log("comment", path, "")
-                self.log("comment", "Length of file: %i" % length, "")
-                
-                # Extract the host name from the address as it is assumed that
-                # communication will be through port 49171.
-                host = address[0]
-                
-                # Start a new thread to request and handle the incoming data.
-                
-                # Create a lock to prevent multiple threads working on the
-                # same file at the same time.
-                if self.transfers.has_key(path):
-                
-                    thread, host = self.transfers[path]
+                    # Only receive the file if the host sending it is the
+                    # user of the file handle.
                     
-                    while thread.isAlive():
+                    path = fh.path
+                    length = fh.length()
                     
-                        pass
-                
-                # Create an event to use to inform the thread that it terminate.
-                event = threading.Event()
-                
-                # Record the event in the transfer events dictionary.
-                self.transfer_events[path] = event
-                
-                # Create a thread to receive the file.
-                thread = threading.Thread(
-                    group = None, target = self.receive_file,
-                    name = 'Transfer "%s" from %s:%i' % (
-                        path, address[0], address[1]
-                        ),
-                    args = (
-                        event, reply_id, pos, amount, fh,
-                        _socket, address
+                    self.log("comment", "", "")
+                    self.log("comment", path, "")
+                    self.log("comment", "Length of file: %i" % length, "")
+                    
+                    # Extract the host name from the address as it is assumed that
+                    # communication will be through port 49171.
+                    host = address[0]
+                    
+                    # Start a new thread to request and handle the incoming data.
+                    
+                    # Create a lock to prevent multiple threads working on the
+                    # same file at the same time.
+                    if self.transfers.has_key(path):
+                    
+                        thread, host = self.transfers[path]
+                        
+                        while thread.isAlive():
+                        
+                            pass
+                    
+                    # Create an event to use to inform the thread that it terminate.
+                    event = threading.Event()
+                    
+                    # Record the event in the transfer events dictionary.
+                    self.transfer_events[path] = event
+                    
+                    # Create a thread to receive the file.
+                    thread = threading.Thread(
+                        group = None, target = self.receive_file,
+                        name = 'Transfer "%s" from %s:%i' % (
+                            path, address[0], address[1]
+                            ),
+                        args = (
+                            event, reply_id, pos, amount, fh,
+                            _socket, address
+                            )
                         )
-                    )
-                
-                # Record the thread in the transfers dictionary.
-                self.transfers[path] = thread, host
-                
-                # Start the thread.
-                thread.start()
-                
-                # Also notify the other client that the share has been updated.
+                    
+                    # Record the thread in the transfers dictionary.
+                    self.transfers[path] = thread, host
+                    
+                    # Start the thread.
+                    thread.start()
+                    
+                    # Also notify the other client that the share has been updated.
                 
             #elif code == 0xe:
             #
@@ -5236,6 +5304,9 @@ class Peer(Ports):
                 
                     # Find the path and previously recorded file length.
                     fh = self.file_handler[handle]
+                    
+                    # Only allow the user of the file to set the length.
+                    if fh.user != host: raise KeyError
                     
                     # Find the current file length.
                     length = fh.length()
@@ -5279,6 +5350,9 @@ class Peer(Ports):
                     # Read the file handle of the file on our machine.
                     fh = self.file_handler[handle]
                     
+                    # Only allow the user of the file to set its filetype.
+                    if fh.user != host: raise IOError
+                    
                     # Use the policy of the share in which the file resides
                     # to modify the file's attributes.
                     share = fh.share
@@ -5300,6 +5374,10 @@ class Peer(Ports):
                     else:
                     
                         msg = ["E"+reply_id, 0x100d6, "Not found"]
+                
+                except IOError:
+                
+                    msg = ["E"+reply_id, 0x100d6, "Not found"]
                 
                 except KeyError:
                 
@@ -5384,6 +5462,9 @@ class Peer(Ports):
                 # Match the handle to the file to use.
                 fh = self.file_handler[handle]
                 
+                # Only allow the user of the file to read its contents.
+                if fh.user != host: raise IOError
+                    
                 file_length = fh.length()
                 
                 fh.seek(pos, 0)

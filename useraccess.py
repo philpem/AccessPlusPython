@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-accessweb.py
+useraccess.py
 
 Administration tool and Access+ peer.
 
