@@ -8,6 +8,7 @@ import glob, os, string, socket, sys, threading, time, types
 
 
 DEFAULT_FILETYPE = 0xffd
+DEFAULT_SUFFIX = os.extsep + "txt"
 
 # Find the number of centiseconds between 1900 and 1970.
 between_epochs = ((365 * 70) + 17) * 24 * 360000
@@ -163,7 +164,7 @@ class Common:
                 else:
                     s = s + "."
             
-            lines.append("%s : %s\n" % (words, s))
+            lines.append("%s : %s" % (words, s))
             
             i = i + 16
         
@@ -376,6 +377,49 @@ class Common:
         # No mappings declared the suffix used.
         return DEFAULT_FILETYPE, self.to_riscos_filename(filename)
     
+    def filetype_to_suffix(self, filename, filetype):
+    
+        # Find the appropriate filetype to use for the filename given.
+        at = string.rfind(filename, "/")
+        
+        if at != -1:
+        
+            # The suffix includes the "/" character. Replace it with this
+            # platform's separator and ignore the filetype.
+            return self.from_riscos_filename(filename)
+        
+        # Find a choice of suffixes to use in the list of mappings.
+        suffixes = None
+        
+        for mapping in self.mimemap:
+        
+            # Convert the MimeMap entry's filetype to a string.
+            if filetype == string.atoi(mapping["Hex"], 16):
+            
+                # Return the first corresponding suffix.
+                try:
+                
+                    suffixes = mapping["Extensions"]
+                    
+                    if len(suffixes) > 0:
+                    
+                        break
+                
+                except KeyError:
+                
+                    pass
+        
+        if suffixes is not None:
+        
+            # Choose the first available suffix.
+            return self.from_riscos_filename(filename) + \
+                os.extsep + suffix[1:]
+        
+        else:
+        
+            # No mappings declared the filetype used.
+            return self.from_riscos_filename(filename) + DEFAULT_SUFFIX
+    
     def construct_directory_name(self, elements):
     
         built = ""
@@ -419,7 +463,7 @@ class Common:
         
         # The number of seconds since the last modification
         # to the file is read.
-        seconds = os.stat(path)[-2]
+        seconds = os.stat(path)[os.path.stat.ST_MTIME]
         
         # Convert this to the RISC OS date format.
         cs = self.to_riscos_time(seconds = seconds)
@@ -432,6 +476,108 @@ class Common:
         date_word = cs & 0xffffffff
         
         return filetype_word, date_word
+    
+    def log(self, direction, data, address):
+    
+        if direction[0] == "s":
+        
+            self._log.append("Sent to %s:%i" % address)
+        
+        else:
+        
+            self._log.append("Received from %s:%i" % address)
+        
+        self._log = self._log + self.interpret(data)
+        
+        self._log.append("")
+    
+    def to_riscos_access(self, mode):
+    
+        """word = to_riscos_access(self, mode)
+        
+        Return a word representing the RISC OS access flags roughly
+        equivalent to the read, write and execute flags for a local file,
+        given as an octal number in integer form.
+        """
+        
+        # Owner permissions
+        owner_read = (mode & os.path.stat.S_IRUSR) != 0
+        owner_write = ((mode & os.path.stat.S_IWUSR) != 0) << 1
+        owner_execute = ((mode & os.path.stat.S_IXUSR) != 0) << 2
+        
+        owner = owner_read | owner_write | owner_execute
+        
+        # Ignore group permissions.
+        
+        # Permissions for others
+        others_read = ((mode & os.path.stat.S_IROTH) != 0) << 4
+        others_write = ((mode & os.path.stat.S_IWOTH) != 0) << 5
+        #others_execute = (mode & os.path.stat.S_IXOTH) != 0
+        
+        others = others_read | others_write
+        
+        return owner | others
+    
+    def from_riscos_access(self, word):
+    
+        """mode = from_riscos_access(self, word)
+        
+        Return a mode value representing the read, write and execute flags
+        for a local file, given as an octal number in integer form roughly
+        equivalent to the RISC OS access flags.
+        """
+        
+        # Owner permissions
+        owner_read = ((word & 0x01) != 0) * os.path.stat.S_IRUSR
+        owner_write = ((word & 0x02) != 0) * os.path.stat.S_IWUSR
+        owner_execute = ((word & 0x04) != 0) * os.path.stat.S_IXUSR
+        
+        owner = owner_read | owner_write | owner_execute
+        
+        # Permissions for others
+        others_read = ((word & 0x10) != 0) * os.path.stat.S_IROTH
+        others_write = ((word & 0x20) != 0) * os.path.stat.S_IWOTH
+        
+        others = others_read | others_write
+        
+        # Group permissions
+        group = others
+        
+        return owner | group | others
+    
+    def repr_mode(self, mode):
+    
+        """string = repr_mode(self, mode)
+        
+        Returns a string showing the access permissions for a file, given
+        as an octal number in integer form.
+        """
+        
+        # Use shortcuts to construct a string with as little code as
+        # possible.
+        
+        # Owner permissions
+        ow_r = ["-", "r"][(mode & os.path.stat.S_IRUSR) != 0]
+        ow_w = ["-", "w"][(mode & os.path.stat.S_IWUSR) != 0]
+        ow_e = ["-", "x"][(mode & os.path.stat.S_IXUSR) != 0]
+        
+        owner = ow_r + ow_w + ow_e
+        
+        # Group permissions.
+        g_r = ["-", "r"][(mode & os.path.stat.S_IRGRP) != 0]
+        g_w = ["-", "w"][(mode & os.path.stat.S_IWGRP) != 0]
+        g_e = ["-", "x"][(mode & os.path.stat.S_IXGRP) != 0]
+        
+        group = g_r + g_w + g_e
+        
+        # Permissions for others
+        ot_r = ["-", "r"][(mode & os.path.stat.S_IROTH) != 0]
+        ot_w = ["-", "w"][(mode & os.path.stat.S_IWOTH) != 0]
+        ot_e = ["-", "x"][(mode & os.path.stat.S_IXOTH) != 0]
+        
+        others = ot_r + ot_w + ot_e
+        
+        return owner + group + others
 
 
 
@@ -569,6 +715,8 @@ class Peer(Common):
         # ---------------------------------------------------------------------
         # Resources configuration
         
+        self._log = []
+        
         # Maintain a dictionary of known clients, shares and printers.
         # Each of these will use a separate thread.
         self.clients = {}
@@ -589,7 +737,7 @@ class Peer(Common):
         # ID value used to open it.
         self.open_shares = {}
         
-        # Keep a dictionary of handles in use but limit its length.
+        # Keep a dictionary of local file handles in use but limit its length.
         self.max_handles = 100
         self.handles = {}
         
@@ -1388,7 +1536,7 @@ class Peer(Common):
         
             code = None
         
-        if command == "A" and code == 0x1:
+        if command == "A" and (code == 0x1 or code == 0x2 or code == 0x4):
         
             # Attempt to open a share, directory or path.
             path = self.read_string(
@@ -1407,10 +1555,22 @@ class Peer(Common):
             
                 if len(path_elements) == 1:
                 
-                    # For unprotected shares, reply with details of the share.
+                    if code != 0x4:
                     
-                    # Use the first word given but substitute "R" for "A".
-                    msg = ["R"+data[1:4], 0xffffcd00, 0, 0x800, 0x13, 0x102, 0]
+                        # For unprotected shares, reply with details of the share.
+                        
+                        # Use the first word given but substitute "R" for "A".
+                        msg = ["R"+data[1:4], 0xffffcd00, 0, 0x800, 0x13, 0x102, 0]
+                    
+                    else:
+                    
+                        # Attempt to create a new object with the share name.
+                        msg = \
+                        [
+                            "E"+data[1:4], 0xaf,
+                            "'%s' cannot be created - " % path + \
+                            "a directory with that name already exists"
+                        ]
                 
                 else:
                 
@@ -1431,27 +1591,41 @@ class Peer(Common):
                     
                     if not os.path.exists(path):
                     
-                        # Look for files with the name given but include those
-                        # with various suffixes.
-                        files = glob.glob(path + "*")
+                        if code == 0x4:
                         
-                        print "Files:", files
-                        
-                        if len(files) == 0:
-                        
-                            path = ""
-                        
-                        elif len(files) == 1:
-                        
-                            path = files[0]
+                            # File is being sent.
+                            self.log("received", data, address)
+                            
+                            try:
+                            
+                                # Create an object on the local filesystem.
+                                open(path, "wb").write("")
+                            
+                            except IOError:
+                            
+                                path = ""
                         
                         else:
                         
-                            path = files[0]
+                            # File doesn't exist, so can't be read.
+                            path = ""
                     
-                    print "Final path:", path
+                    elif code == 0x4:
+                    
+                        # File is being sent but one already exists.
+                        self.log("received", data, address)
+                        
+                        try:
+                        
+                            # Create an object on the local filesystem.
+                            open(path, "wb").write("")
+                        
+                        except IOError:
+                        
+                            path = ""
                     
                     # Try to find the details of the object.
+                    
                     if path != "" and os.path.isdir(path):
                     
                         # A directory
@@ -1464,12 +1638,15 @@ class Peer(Common):
                         # filesystem.
                         length = 0x800
                         
-                        access_attr = 0x10
+                        # Construct access attributes for the other client.
+                        mode = os.stat(path)[os.path.stat.ST_MODE]
+                        access_attr = self.to_riscos_access(mode)
                         
+                        # Use a default value for the object type.
                         object_type = 0x2
                         
                         # Use the inode of the directory as its handle.
-                        handle = os.stat(path)[1] & 0xffffffff
+                        handle = os.stat(path)[os.path.stat.ST_INO] & 0xffffffff
                         
                         # Keep this handle for possible later use.
                         self.handles[handle] = (path, length)
@@ -1484,15 +1661,23 @@ class Peer(Common):
                         # date words.
                         filetype, date = self.make_riscos_filetype_date(path)
                         
+                        if code == 0x4:
+                        
+                            filetype = 0xdeaddead
+                            date = 0xdeaddead
+                        
                         # Find the length of the file.
                         length = os.path.getsize(path)
                         
-                        access_attr = 0x3
+                        # Construct access attributes for the other client.
+                        mode = os.stat(path)[os.path.stat.ST_MODE]
+                        access_attr = self.to_riscos_access(mode)
                         
+                        # Use a default value for the object type.
                         object_type = 0x0101
                         
                         # Use the inode of the file as its handle.
-                        handle = os.stat(path)[1]# & 0xffffff7f
+                        handle = os.stat(path)[os.path.stat.ST_INO]# & 0xffffff7f
                         
                         # Keep this handle for possible later use.
                         self.handles[handle] = (path, length)
@@ -1500,17 +1685,17 @@ class Peer(Common):
                         msg = [ "R"+data[1:4], filetype, date, length,
                                 access_attr, object_type, handle ]
                     
+                    elif code != 0x4:
+                    
+                        # Reply with an error message.
+                        msg = ["E"+data[1:4], 0x100d6, "Not found"]
+                    
                     else:
                     
                         # Reply with an error message.
                         msg = ["E"+data[1:4], 0x100d6, "Not found"]
                 
-                #print
-                #print "Sent:"
-                #for line in self.interpret(self._encode(msg)):
-                #
-                #    print line
-                #print
+                self.log("sent", self._encode(msg), address)
                 
                 # Send a reply.
                 self._send_list(msg, _socket, address)
@@ -1540,24 +1725,16 @@ class Peer(Common):
             
             self._send_list(msg, _socket, address)
         
-#        elif command == "A" and code == 0xb:
-#        
-#            # Rebroadcasted request for information.
-#            
-#            print "From: %s:%i" % address
-#            
-#            lines = self.interpret(data)
-#            
-#            for line in lines:
-#            
-#                print line
-#            
-#            print
-#            
-#            # Reply with an error message.
-#            msg = ["E"+data[1:4], 0x163ac, "Shared disc not available."]
-#            
-#            self._send_list(msg, _socket, address)
+        elif command == "A" and code == 0xf:
+        
+            # Dismount?
+            
+            self.log("received", data, address)
+            
+            # Reply with an error message.
+            msg = ["E"+data[1:4], 0x163ac, "Shared disc not available."]
+            
+            self._send_list(msg, _socket, address)
         
         elif command == "B" and code == 0x3:
         
@@ -1648,7 +1825,7 @@ class Peer(Common):
                         
                         # The number of seconds since the last modification
                         # to the file is read.
-                        seconds = os.stat(this_path)[-2]
+                        seconds = os.stat(this_path)[os.path.stat.ST_MTIME]
                         
                         # Convert this to the RISC OS date format.
                         cs = self.to_riscos_time(seconds = seconds)
@@ -1676,18 +1853,14 @@ class Peer(Common):
                         
                         length = length + 4
                         
-                        # Flags word (0x10 for directory)
-                        if os.path.isdir(this_path):
+                        # Access attributes
+                        mode = os.stat(this_path)[os.path.stat.ST_MODE]
                         
-                            file_msg.append(0x10)
-                        
-                        else:
-                        
-                            file_msg.append(0x03)
+                        file_msg.append(self.to_riscos_access(mode))
                         
                         length = length + 4
                         
-                        # Flags word (0x2 for directory)
+                        # Object type (0x2 for directory)
                         if os.path.isdir(this_path):
                         
                             file_msg.append(0x02)
@@ -1725,7 +1898,7 @@ class Peer(Common):
                 # catalogue request.
                 
                 # Use the inode of the directory as its handle.
-                handle = os.stat(path)[1] & 0xffffffff
+                handle = os.stat(path)[os.path.stat.ST_INO] & 0xffffffff
                 
                 share_value = (handle & 0xffffff00) ^ 0xffffff02
                 
@@ -1858,15 +2031,7 @@ class Peer(Common):
         
         else:
         
-            print "From: %s:%i" % address
-            
-            lines = self.interpret(data)
-            
-            for line in lines:
-            
-                print line
-            
-            print
+            self.log("received", data, address)
     
     def listen(self, event):
     
@@ -2162,6 +2327,27 @@ class Peer(Common):
         # Return a negative result.
         return 0, (0, "The machine containing the shared disc does not respond")
     
+    def _read_file_info(self, data):
+    
+        # Read the information on the object.
+        filetype_word = self.str2num(4, data[4:8])
+        filetype = (filetype_word & 0xfff00) >> 8
+        date_str = hex(self.str2num(4, data[4:8]))[-2:] + \
+                hex(self.str2num(4, data[8:12]))[2:]
+        
+        date = self.from_riscos_time(long(date_str, 16))
+        
+        length = self.str2num(4, data[12:16])
+        access_attr = self.str2num(4, data[16:20])
+        object_type = self.str2num(4, data[20:24])
+        handle = self.str2num(4, data[24:28])
+        
+        return { "filetype": filetype, "date": date,
+                 "length": length,
+                 "access": access_attr, "type": object_type,
+                 "handle": handle,
+                 "isdir": (object_type == 0x2) }
+    
     def info(self, name, host):
     
         """info(self, name, host)
@@ -2198,27 +2384,8 @@ class Peer(Common):
         
             print 'Successfully opened "%s"' % name
         
-        # Read the information on the object.
-        filetype_word = self.str2num(4, data[4:8])
-        filetype = (filetype_word & 0xfff00) >> 8
-        date_str = hex(self.str2num(4, data[4:8]))[-2:] + \
-                hex(self.str2num(4, data[8:12]))[2:]
-        
-        date = self.from_riscos_time(long(date_str, 16))
-        
-        length = self.str2num(4, data[12:16])
-        access_attr = self.str2num(4, data[16:20])
-        object_type = self.str2num(4, data[20:24])
-        handle = self.str2num(4, data[24:28])
-        
-        #print hex(handle)
-        
         # Return the information on the item.
-        return { "filetype": filetype, "date": date,
-                 "length": length,
-                 "access": access_attr, "type": object_type,
-                 "handle": handle,
-                 "isdir": (object_type == 0x2) }
+        return self._read_file_info(data)
     
     def catalogue(self, name, host):
     
@@ -2289,12 +2456,12 @@ class Peer(Common):
             length = self.str2num(4, data[c:c+4])
             c = c + 4
             
-            # Flags word (0x10 for directory)
-            flags1 = self.str2num(4, data[c:c+4])
+            # Access attributes
+            access_attr = self.str2num(4, data[c:c+4])
             c = c + 4
             
-            # Flags word (0x2 for directory)
-            flags2 = self.str2num(4, data[c:c+4])
+            # Object type (0x2 for directory)
+            object_type = self.str2num(4, data[c:c+4])
             c = c + 4
             
             # Zero terminated name string
@@ -2308,17 +2475,22 @@ class Peer(Common):
             
                 c = c + 4 - (c % 4)
             
-            files.append( (filetype_word, date, length, flags1, flags2, name) )
+            files.append( (
+                filetype_word, date, length, access_attr, object_type, name
+                ) )
+            
             lines.append(
-                "%s: %03x (%i bytes) %i %i %s" % (
-                    name, filetype, length, flags1, flags2,
+                "%s\t:\t%03x\t(%i bytes)\t%s\t%i\t%s" % (
+                    name, filetype, length,
+                    self.repr_mode(self.from_riscos_access(access_attr)),
+                    object_type,
                     time.asctime(date)
                     )
                 )
         
         for line in lines:
         
-            print line
+            print string.expandtabs(line, 4)
         
         # The data following the directory structure is concerned
         # with the share and is like a return value from a share
@@ -2328,7 +2500,7 @@ class Peer(Common):
         # Return the catalogue information.
         return files
     
-    def fetch(self, name, host):
+    def get(self, name, host):
     
         # Read the object's information.
         info = self.info(name, host)
@@ -2441,3 +2613,81 @@ class Peer(Common):
             return None
         
         return string.join(file_data, "")
+    
+    def put(self, path, name, host):
+    
+        # Use the non-broadcast socket.
+        if not self.ports.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return
+        
+        s = self.ports[49171]
+        
+        try:
+        
+            length = os.path.getsize(path)
+        
+        except OSError:
+        
+            return
+        
+        # Convert the filename into a RISC OS filename on the share.
+        directory, file = os.path.split(path)
+        
+        print file
+        
+        filetype, ros_file = self.suffix_to_filetype(file)
+        
+        print ros_file
+        
+        # Join the path with the share name to obtain a share-relative
+        # path.
+        ros_path = name + "." + ros_file
+        
+        print ros_path
+        
+        # Create a string to send indicating that a file is to be uploaded.
+        new_id = self.new_id()
+        
+        msg = ["A"+new_id, 0x4, 0, ros_path+"\x00"]
+        
+        self.log("sent", self._encode(msg), (host, 49171))
+        
+        # Send the request.
+        self._send_list(msg, s, (host, 49171))
+        
+        # Wait for a reply.
+        replied, data = self.expect_reply(s, msg, host, new_id, ["R"])
+        
+        if replied == 0:
+        
+            return
+        
+        # The data returned represents the information about the newly
+        # created remote file.
+        info = self._read_file_info(data)
+        
+        self.log("received", data, (host, 49171))
+        
+        # Send a follow up request.
+        new_id = self.new_id()
+        
+        msg = ["A"+new_id, 0xc, 0, info["handle"], 0, 0x00010000]
+        
+        self.log("sent", self._encode(msg), (host, 49171))
+        
+        # Send the request.
+        self._send_list(msg, s, (host, 49171))
+        
+        # Wait for a reply.
+        replied, data = self.expect_reply(s, msg, host, new_id, ["R"])
+        
+        if replied == 0:
+        
+            return
+        
+        self.log("received", data, (host, 49171))
+        
+        return data
+
