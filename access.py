@@ -91,6 +91,7 @@ ROS_DIR_LENGTH = 0x800
 
 
 DEBUG = 1
+LOG_LEVEL = 0   # show all messages
 
 # Host name configuration
 
@@ -697,9 +698,10 @@ class Ports(Common):
         
         return replied, data
     
-    def log(self, direction, data, address):
+    def log(self, direction, data, address, level = 0):
     
         if DEBUG == 0: return
+        if LOG_LEVEL > level: return
         
         if direction[0] == "s" and type(data) == types.ListType:
         
@@ -4197,6 +4199,12 @@ class Peer(Ports):
     
         # This method should only get called once by the thread it belongs
         # to, then the thread should terminate.
+        
+        self.log(
+            "comment",
+            "Receiving file: start = %i, amount = %i" % (start, amount),
+            "", level = 1
+            )
         
         pos = start
         
