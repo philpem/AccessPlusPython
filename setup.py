@@ -8,6 +8,6 @@ setup(
     author="David Boddie",
     author_email="david@boddie.org.uk",
     url="http://www.boddie.org.uk/david/Projects/Python/AccessPlusPython/",
-    version="0.27",
+    version="0.28",
     py_modules=["access"]
     )
