@@ -1,13 +1,16 @@
 """
-    tools.py
+    access.py
     
-    Tools for examining data send via UDP from an Access+ station.
+    Tools for examining data sent via UDP from an Access+ station.
 """
 
-import glob, os, string, socket, sys, time, threading, types
+import glob, os, string, socket, sys, threading, time, types
 
 
 default_filetype = 0xffd
+
+# Find the number of centiseconds between 1900 and 1970.
+between_epochs = ((365 * 70) + 17) * 24 * 360000
 
 
 class Common:
@@ -233,23 +236,32 @@ class Common:
 #        
 #        return string.join(output, "")
     
-    to_riscos = {".": "/", " ": "\xa0"}
+    to_riscos = {".": "/", " ": "\xa0", "/": "."}
+    from_riscos = {"/": ".", "\xa0": " ", ".": "/"}
     
-    def riscos_filename(self, name):
+    def _filename(self, name, dict):
     
         new = []
         
         for c in name:
         
-            if self.to_riscos.has_key(c):
+            if dict.has_key(c):
             
-                new.append(self.to_riscos[c])
+                new.append(dict[c])
             
             else:
             
                 new.append(c)
         
         return string.join(new, "")
+    
+    def to_riscos_filename(self, name):
+    
+        return self._filename(name, self.to_riscos)
+    
+    def from_riscos_filename(self, name):
+    
+        return self._filename(name, self.from_riscos)
     
     def read_mimemap(self):
     
@@ -335,7 +347,7 @@ class Common:
         if at == -1:
         
             # No suffix: return the default filetype.
-            return default_filetype, self.riscos_filename(filename)
+            return default_filetype, self.to_riscos_filename(filename)
         
         # The suffix includes the "." character. Remove this platform's
         # separator and replace it with a ".".
@@ -350,17 +362,17 @@ class Common:
                 try:
                 
                     return string.atoi(mapping["Hex"], 16), \
-                        self.riscos_filename(filename)[:at]
+                        self.to_riscos_filename(filename)[:at]
                    
                 except ValueError:
                 
                     # The value found was not in a valid hexadecimal
                     # representation. Return the default filetype.
                     return default_filetype, \
-                        self.riscos_filename(filename)
+                        self.to_riscos_filename(filename)
         
         # No mappings declared the suffix used.
-        return default_filetype, self.riscos_filename(filename)
+        return default_filetype, self.to_riscos_filename(filename)
     
     def construct_directory_name(self, elements):
     
@@ -371,6 +383,53 @@ class Common:
             built = os.path.join(built, element)
         
         return built
+    
+    def from_riscos_time(self, value):
+    
+        # RISC OS time is given as a five byte block containing the
+        # number of centiseconds since 1900 (presumably 1st January 1900).
+        
+        # Convert the time to the time elapsed since the Epoch (assuming
+        # 1970 for this value).
+        centiseconds = value - between_epochs
+        
+        # Convert this to a value in seconds and return a time tuple.
+        return time.localtime(centiseconds / 100.0)
+        
+    def to_riscos_time(self, ttuple = None, seconds = 0):
+    
+        if ttuple is not None:
+        
+            # Find the number of seconds since the Epoch using the time tuple
+            # given.
+            seconds = time.mktime(value)
+        
+        # Add the number of centiseconds to the number elapsed between 1900
+        # and the Epoch (assuming 1970 for this value).
+        return long(seconds * 100) + between_epochs
+    
+    def make_riscos_filetype_date(self, path):
+    
+        # Construct the filetype and date words.
+        
+        # Determine the relevant filetype to use.
+        filetype, filename = self.suffix_to_filetype(path)
+        
+        # The number of seconds since the last modification
+        # to the file is read.
+        seconds = os.stat(path)[-2]
+        
+        # Convert this to the RISC OS date format.
+        cs = self.to_riscos_time(seconds = seconds)
+        
+        filetype_word = \
+            0xfff00000 | (filetype << 8) | \
+            ((cs & 0xff00000000) >> 32)
+        
+        # Date word
+        date_word = cs & 0xffffffff
+        
+        return filetype_word, date_word
 
 
 
@@ -1300,11 +1359,21 @@ class Peer(Common):
     
         host = address[0]
         
+        print "From: %s:%i" % address
+        
+        lines = self.interpret(data)
+        
+        for line in lines:
+        
+            print line
+        
+        print
+            
         if data[0] == "A":
         
             # Attempt to open a share, directory or path.
             path = self.read_string(
-                data[12:], ending = "\000", include = 0
+                data[12:], ending = "\x00", include = 0
                 )
             
             # Split the path up into elements.
@@ -1313,7 +1382,8 @@ class Peer(Common):
             # The first element is the share name.
             share_name = path_elements[0]
             
-            print 'Request to open "%s"' % share_name
+            #print 'Request to open "%s"' % share_name
+            print share_name, path_elements
             
             if self.shares.has_key((share_name, self.hostaddr)):
             
@@ -1323,44 +1393,94 @@ class Peer(Common):
                     
                     # Use the first word given but substitute "R" for "A".
                     msg = ["R"+data[1:4], 0xffffcd00, 0, 0x800, 0x13, 0x102, 0]
-                    
-                    #print "Sent:"
-                    #for line in self.interpret(self._encode(msg)):
-                    #
-                    #    print line
-                    #print
-                    
-                    #msg = "R"+data[1:4] + '\x00\xcd\xff\xff\x00\x00\x00\x00\x00\x08\x00\x00\x13\x00\x00\x00\x02\x01\x00\x00\x01:\xa6\x04'
-                    
-                    #_socket.sendto(msg, address)
                 
                 else:
                 
                     # Read the directory name associated with this share.
-                    thread, directory = self.shares[(name, self.hostaddr)]
+                    thread, directory = self.shares[(share_name, self.hostaddr)]
                     
                     # Construct a path to the object below the shared
                     # directory.
-                    path = self.construct_directory_name(path_elements[1:])
+                    #path = self.construct_directory_name(path_elements[1:])
+                    path = self.from_riscos_filename(
+                        string.join(path_elements[1:], ".")
+                        )
                     
                     # Append this path to the shared directory's path.
                     path = os.path.join(directory, path)
                     
-                    # Look for files with the 
+                    if not os.path.exists(path):
+                    
+                        # Look for files with the name given but include those
+                        # with various suffixes.
+                        files = glob.glob(path + "*")
+                        
+                        if len(files) == 0:
+                        
+                            path = ""
+                        
+                        elif len(files) == 1:
+                        
+                            path = files[0]
+                        
+                        else:
+                        
+                            path = files[0]
                     
                     # Try to find the details of the object.
-                    if os.path.isdir(path):
+                    if path != "" and os.path.isdir(path):
                     
                         # A directory
-                        msg = ["R"+data[1:4], 0xfffffd00, 0, 0x800, 0x10, 0]
+                        
+                        # Determine the directory's relevant filetype and
+                        # date words.
+                        filetype, date = self.make_riscos_filetype_date(path)
+                        
+                        # Don't reveal the size of directories on the local
+                        # filesystem.
+                        length = 0x800
+                        
+                        access_attr = 0x10
+                        
+                        object_type = 0x2
+                        
+                        # Use the inode of the directory as its handle.
+                        handle = os.stat(path)[1] & 0xffffffff
+                        
+                        msg = [ "R"+data[1:4], filetype, date, length,
+                                access_attr, object_type, handle ]
                     
-                    elif os.path.isfile(path):
+                    elif path != "" and os.path.isfile(path):
                     
                         # A file
-                        filetype, filename = self.suffix_to_filetype(file)
+                        # Determine the file's relevant filetype and
+                        # date words.
+                        filetype, date = self.make_riscos_filetype_date(path)
                         
-                        msg = [ "R"+data[1:4], 0xfff0004b | (filetype << 8),
-                                ]
+                        # Find the length of the file.
+                        length = os.path.getsize(path)
+                        
+                        access_attr = 0x3
+                        
+                        object_type = 0x1
+                        
+                        # Use the inode of the file as its handle.
+                        handle = os.stat(path)[1] & 0xffffffff
+                        
+                        msg = [ "R"+data[1:4], filetype, date, length,
+                                access_attr, object_type, handle ]
+                    
+                    else:
+                    
+                        # Reply with an error message.
+                        msg = ["E"+data[1:4], 0x100d6, "Not found"]
+                
+                print
+                print "Sent:"
+                for line in self.interpret(self._encode(msg)):
+                
+                    print line
+                print
                 
                 # Send a reply.
                 self._send_list(msg, _socket, address)
@@ -1377,19 +1497,51 @@ class Peer(Common):
         
             # Request for information.
             
-            share_name = self.read_string(
-                data[16:], ending = "\000", include = 0
+            path = self.read_string(
+                data[16:], ending = "\x00", include = 0
                 )
             
-            print 'Request to catalogue "%s"' % share_name
+            # Split the path up into elements.
+            path_elements = string.split(path, ".")
+            
+            # The first element is the share name.
+            share_name = path_elements[0]
+            
+            # Read the directory name associated with this share.
+            thread, directory = self.shares[(share_name, self.hostaddr)]
+            
+            # Construct a path to the object below the shared
+            # directory.
+            #path = self.construct_directory_name(path_elements[1:])
+            
+            print directory, path_elements[1:]
+            
+            path = self.from_riscos_filename(
+                string.join(path_elements[1:], ".")
+                )
+            
+            print path
+            
+            # Append this path to the shared directory's path.
+            path = os.path.join(directory, path)
+                    
+            print 'Request to catalogue "%s"' % path
+            
+            if not os.path.isdir(path):
+            
+                # Reply with an error message.
+                self._send_list(
+                    ["E"+data[1:4], 0x163c5, "Not a Directory"],
+                    _socket, address
+                    )
+                
+                return
             
             try:
             
                 # For unprotected shares, return a catalogue to the client.
                 
-                thread, direct = self.shares[(share_name, self.hostaddr)]
-                
-                files = os.listdir(direct)
+                files = os.listdir(path)
                 
                 # Write the message, starting with the code and ID word.
                 msg = ["S"+data[1:4]]
@@ -1407,13 +1559,7 @@ class Peer(Common):
 
                 dir_length = 0
                 
-                # Count the number of files to be sent. More than 77 files
-                # may cause problems. We will use os.stat to check for
-                # objects which are not files or directories.
-                
                 n_files = 0
-                
-                new_files = []
                 
                 for file in files:
                 
@@ -1421,64 +1567,51 @@ class Peer(Common):
                     
                         continue
                     
-                    try:
-                    
-                        os.stat(os.path.join(direct, file))
-                        n_files = n_files + 1
-                        new_files.append(file)
-                    
-                    except OSError:
-                    
-                        pass
-                    
-                    # If 77 files have been listed then list no more.
-                    #if n_files == 77: break
-                
-                #print "%i files found." % n_files
-                
-                n_files = 0
-                
-                for file in new_files:
-                
                     file_msg = []
                     length = 0
                     
-                    path = os.path.join(direct, file)
+                    # Construct the path to the file.
+                    this_path = os.path.join(path, file)
                     
                     try:
                     
                         # Filetype word
                         filetype, filename = self.suffix_to_filetype(file)
                         
-                        if os.path.isdir(path):
+                        # Construct the filetype and date words.
                         
-                            file_msg.append(0xfffffd49)
+                        # The number of seconds since the last modification
+                        # to the file is read.
+                        seconds = os.stat(this_path)[-2]
                         
-                        else:
+                        # Convert this to the RISC OS date format.
+                        cs = self.to_riscos_time(seconds = seconds)
                         
-                            # Use the suffix of the file to generate a
-                            # filetype.
-                            file_msg.append(0xfff0004b | (filetype << 8))
+                        filetype_word = \
+                            0xfff00000 | (filetype << 8) | \
+                            ((cs & 0xff00000000) >> 32)
+                        
+                        file_msg.append(filetype_word)
                         
                         length = length + 4
                         
-                        # Unknown word
-                        file_msg.append(0)
+                        # Date word
+                        file_msg.append(cs & 0xffffffff)
                         length = length + 4
                         
                         # Length word (0x800 for directory)
-                        if os.path.isdir(path):
+                        if os.path.isdir(this_path):
                         
                             file_msg.append(0x800)
                         
                         else:
                         
-                            file_msg.append(os.path.getsize(path))
+                            file_msg.append(os.path.getsize(this_path))
                         
                         length = length + 4
                         
                         # Flags word (0x10 for directory)
-                        if os.path.isdir(path):
+                        if os.path.isdir(this_path):
                         
                             file_msg.append(0x10)
                         
@@ -1489,7 +1622,7 @@ class Peer(Common):
                         length = length + 4
                         
                         # Flags word (0x2 for directory)
-                        if os.path.isdir(path):
+                        if os.path.isdir(this_path):
                         
                             file_msg.append(0x02)
                         
@@ -1501,7 +1634,7 @@ class Peer(Common):
                         
                         # Convert the name into a form suitable for the
                         # other client.
-                        #file_name = self.riscos_filename(file)
+                        #file_name = self.to_riscos_filename(file)
                         
                         # Zero terminated name string
                         name_string = self._encode([filename + "\x00"])
@@ -1524,10 +1657,18 @@ class Peer(Common):
                 # with the share and is like a return value from a share
                 # open request but with a "B" command word like a
                 # catalogue request.
+                
+                # Use the inode of the directory as its handle.
+                handle = os.stat(path)[1] & 0xffffffff
+                
+                share_value = (handle & 0xffffff00) ^ 0xffffff02
+                
                 msg = msg + \
                 [
                     "B"+data[1:4], 0xffffcd00, 0x00000000, 0x00000800,
-                       0x00000013, 0x00000002, 0x00000000, dir_length,
+                       0x00000013, share_value, handle,     dir_length,
+                     # common value for this^  ^handle of object as with
+                     #                  share  info
                        0xffffffff
                 ]
                 
@@ -1537,12 +1678,12 @@ class Peer(Common):
                 # Send the reply.
                 self._send_list(msg, _socket, address)
                 
-                print
-                print "Sent:"
-                for line in self.interpret(self._encode(msg)):
-                
-                    print line
-                print
+                #print
+                #print "Sent:"
+                #for line in self.interpret(self._encode(msg)):
+                #
+                #    print line
+                #print
             
             except (KeyError, OSError):
             
@@ -1551,6 +1692,11 @@ class Peer(Common):
                     ["E"+data[1:4], 0x163ac, "Shared disc not available."],
                     _socket, address
                     )
+        
+        #elif data[0] == "B" and self.str2num(4, data[4:8]) == 0xb:
+        #
+        #    # Some sort of file request.
+        #    pass
         
         elif data[0] == "B" and self.str2num(4, data[4:8]) == 0xd:
         
@@ -1848,7 +1994,7 @@ class Peer(Common):
         if not self.ports.has_key(49171):
         
             print "No socket to use for port %i" % 49171
-            return
+            return None
         
         s = self.ports[49171]
         
@@ -1887,7 +2033,7 @@ class Peer(Common):
                     print 'Error: "%s"' % data[8:]
                     self.share_messages.remove(data)
                     
-                    return
+                    return None
             
             t1 = time.time()
             
@@ -1902,19 +2048,29 @@ class Peer(Common):
         if replied == 0:
         
             print "The machine containing the shared disc does not respond"
-            return
+            return None
         
         # Read the information on the object.
-        filetype = (self.str2num(4, data[4:8]) & 0xfff00) >> 8
-        unknown = self.str2num(4, data[8:12])
+        filetype_word = self.str2num(4, data[4:8])
+        filetype = (filetype_word & 0xfff00) >> 8
+        date_str = hex(self.str2num(4, data[4:8]))[-2:] + \
+                hex(self.str2num(4, data[8:12]))[2:]
+        
+        date = self.from_riscos_time(long(date_str, 16))
+        
         length = self.str2num(4, data[12:16])
-        flags1 = self.str2num(4, data[16:20])
-        flags2 = self.str2num(4, data[20:24])
+        access_attr = self.str2num(4, data[16:20])
+        object_type = self.str2num(4, data[20:24])
+        handle = self.str2num(4, data[24:28])
+        
+        print hex(handle)
         
         # Return the information on the item.
-        return { "filetype": filetype, "unknown": unknown,
-                 "length": length, "flags1": flags1, "flags2": flags2,
-                 "isdir": (flags1 & 0x10) }
+        return { "filetype": filetype, "date": date,
+                 "length": length,
+                 "access": access_attr, "type": object_type,
+                 "handle": handle,
+                 "isdir": (object_type == 0x2) }
     
     def catalogue(self, name, host):
     
@@ -2016,7 +2172,11 @@ class Peer(Common):
             c = c + 4
             
             # Unknown word
-            unknown = self.str2num(4, data[c:c+4])
+            date_str = hex(filetype_word)[-2:] + \
+                hex(self.str2num(4, data[c:c+4]))[2:]
+            
+            date = self.from_riscos_time(long(date_str, 16))
+            
             c = c + 4
             
             # Length word (0x800 for directory)
@@ -2042,10 +2202,11 @@ class Peer(Common):
             
                 c = c + 4 - (c % 4)
             
-            files.append( (filetype_word, unknown, length, flags1, flags2, name) )
+            files.append( (filetype_word, date, length, flags1, flags2, name) )
             lines.append(
-                "%s: %03x (%i bytes) %i %i" % (
-                    name, filetype, length, flags1, flags2
+                "%s: %03x (%i bytes) %i %i %s" % (
+                    name, filetype, length, flags1, flags2,
+                    time.asctime(date)
                     )
                 )
         
@@ -2056,3 +2217,69 @@ class Peer(Common):
         
         # Return the catalogue information.
         return files
+    
+    def fetch(self, name, host):
+    
+        # Read the object's information.
+        info = self.info(name, host)
+        
+        if info is None:
+        
+            return
+        
+        # Use the non-broadcast socket (we have established that it exists).
+        s = self.ports[49171]
+        
+        # Create a string to send. The three bytes following the "B"
+        # character are used to identify the response from the other
+        # client (it passes them back). We retrieve them from a
+        # dictionary.
+        new_id = self.new_id()
+        
+        handle = info["handle"]
+        
+        data = ["B"+new_id, 0xb, handle, 0, info["length"]]
+        
+        return
+        
+        print "Sent:"
+        for line in self.interpret(self._encode(data)):
+        
+            print line
+        print
+        
+        # Send the request.
+        self._send_list(data, s, (host, 49171))
+        
+        replied = 0
+        tries = 5
+
+        # Keep a record of the time of the previous request.
+        t0 = time.time()
+        
+        while replied == 0 and tries > 0:
+        
+            # See if the response has arrived.
+            for data in self.share_messages:
+            
+                if data[:4] == "E"+new_id:
+                
+                    self.share_messages.remove(data)
+                    
+                    return []
+            
+            t1 = time.time()
+            
+            if replied == 0 and (t1 - t0) > 1.0:
+            
+                # Send the request again.
+                self._send_list(data, s, (host, 49171))
+                
+                t0 = t1
+                tries = tries - 1
+        
+        if replied == 0:
+        
+            print "The machine containing the shared disc does not respond"
+            return
+        
