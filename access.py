@@ -1115,7 +1115,7 @@ class Buffer:
 
 class Directory:
 
-    def __init__(self, path, share):
+    def __init__(self, path, share, user):
     
         if not os.path.exists(path):
         
@@ -1136,6 +1136,7 @@ class Directory:
         
         self.path = path
         self.share = share
+        self.user = user
     
     def length(self):
     
@@ -1880,7 +1881,7 @@ class Share(Ports, Translate):
             # Keep this handle for possible later use.
             if not self.file_handler.has_key(handle):
             
-                self.file_handler[handle] = Directory(path, self)
+                self.file_handler[handle] = Directory(path, self, host)
             
             else:
             
@@ -1928,10 +1929,10 @@ class Share(Ports, Translate):
             # Reply with an error message.
             return None, path
     
-    def create_file(self, ros_path):
+    def create_file(self, ros_path, host):
     
         # Try to open the corresponding file.
-        info, path = self.open_path(ros_path)
+        info, path = self.open_path(ros_path, host)
         
         if ros_path == "":
         
@@ -2012,7 +2013,7 @@ class Share(Ports, Translate):
             # Keep this handle for possible later use.
             if not self.file_handler.has_key(handle):
             
-                self.file_handler[handle] = Directory(path, self)
+                self.file_handler[handle] = Directory(path, self, host)
             
             return [ filetype, date, length, access_attr, object_type,
                      handle ], path
@@ -2475,7 +2476,7 @@ class Share(Ports, Translate):
         
         return info, trailer, new_pos
     
-    def create_directory(self, ros_path):
+    def create_directory(self, ros_path, host):
     
         # Construct a path to the object below the shared directory.
         path = self.from_riscos_path(ros_path, find_obj = 0)
@@ -2537,7 +2538,7 @@ class Share(Ports, Translate):
         # Keep this handle for possible later use.
         if not self.file_handler.has_key(handle):
         
-            self.file_handler[handle] = Directory(path, self)
+            self.file_handler[handle] = Directory(path, self, host)
         
         return [ filetype, date, length, access_attr, object_type,
                  handle ], path
@@ -4886,7 +4887,7 @@ class Peer(Ports):
                 try:
                 
                     share = self.shares[(share_name, Hostaddr)]
-                    info, path = share.open_path(ros_path)
+                    info, path = share.open_path(ros_path, host)
                 
                 except KeyError:
                 
@@ -4928,7 +4929,7 @@ class Peer(Ports):
                 try:
                 
                     share = self.shares[(share_name, Hostaddr)]
-                    info, path = share.create_file(ros_path)
+                    info, path = share.create_file(ros_path, host)
                 
                 except KeyError:
                 
@@ -4971,7 +4972,7 @@ class Peer(Ports):
                 try:
                 
                     share = self.shares[(share_name, Hostaddr)]
-                    info, path = share.create_directory(ros_path)
+                    info, path = share.create_directory(ros_path, host)
                 
                 except KeyError:
                 
