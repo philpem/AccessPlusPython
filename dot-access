@@ -1,0 +1,4 @@
+# Share      Path                   Mode    Delay (s)   Presentation    Filetype
+
+#  user      /home/user/share       0644    30.0        truncate        0xfff
+#  scratch   /home/user/temp/share  0666    30.0        truncate        0xfff

@@ -1,7 +1,28 @@
+#!/usr/bin/env python
 """
-    access.py
-    
-    Tools for examining data sent via UDP from an Access+ station.
+access.py
+
+Tools for examining data sent via UDP from an Access+ station.
+
+Copyright (c) 2003, David Boddie
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to
+deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 """
 
 import glob, os, string, socket, sys, threading, time, types
@@ -1141,6 +1162,11 @@ class Directory:
     def length(self):
     
         return ROS_DIR_LENGTH
+    
+    def close(self):
+    
+        pass
+
 
 
 class Unused(Common):
@@ -1242,7 +1268,7 @@ class Translate:
         
         if f is None:
         
-            print "Failed to find MimeMap file."
+            sys.stdout.write("Failed to find MimeMap file.\n")
             lines = []
         
         else:
@@ -2714,7 +2740,7 @@ class RemoteShare(Ports, Translate):
         
         for line in lines:
         
-            print string.expandtabs(line, 4)
+            sys.stdout.write(string.expandtabs(line, 4)+"\n")
         
         # The data following the directory structure is concerned
         # with the share and is like a return value from a share
@@ -3765,12 +3791,12 @@ class Peer(Ports):
         # Close all sockets.
         for port, _socket in self.broadcasters.items():
         
-            print "Closing socket for port %i" % port
+            sys.stdout.write("Closing socket for port %i\n" % port)
             _socket.close()
         
         for port, _socket in self.ports.items():
         
-            print "Closing socket for port %i" % port
+            sys.stdout.write("Closing socket for port %i\n" % port)
             _socket.close()
     
     def create_shares(self):
@@ -3865,7 +3891,7 @@ class Peer(Ports):
         
         if f is None:
         
-            print "Failed to find access.cfg file."
+            sys.stdout.write("Failed to find access.cfg file.\n")
             lines = []
         
         else:
@@ -4532,7 +4558,7 @@ class Peer(Ports):
                     
                     self.shares[(share_name, host)] = share
             
-            else:
+            elif DEBUG == 1:
             
                 print "From: %s:%i" % address
                 
@@ -4623,7 +4649,7 @@ class Peer(Ports):
                     # Add the printer name and host to the printers dictionary.
                     self.printers[(printer_name, host)] = (None, None)
             
-            else:
+            elif DEBUG == 1:
             
                 print "From: %s:%i" % address
                 
@@ -4673,7 +4699,7 @@ class Peer(Ports):
                 # information about the client.
                 info = data[c:c+length2]
                 
-                print "Query: %s %08x" % (client_name, self.str2num(4, info))
+                #print "Query: %s %08x" % (client_name, self.str2num(4, info))
             
             elif minor == 0x0004:
             
@@ -4697,7 +4723,7 @@ class Peer(Ports):
                     # Add an entry for the client to the dictionary.
                     self.clients[(client_name, host)] = info
             
-            else:
+            elif DEBUG == 1:
             
                 print "From: %s:%i" % address
                 
@@ -4706,7 +4732,8 @@ class Peer(Ports):
                 for line in lines:
                 
                     print line
-        else:
+        
+        elif DEBUG == 1:
         
             print "From: %s:%i" % address
             
@@ -5225,63 +5252,72 @@ class Peer(Ports):
                 pos = self.str2num(4, data[12:16])
                 amount = self.str2num(4, data[16:20])
                 
-                # Translate the handle into a path.
-                fh = self.file_handler[handle]
+                try:
                 
-                if fh.user == host:
-                
-                    # Only receive the file if the host sending it is the
-                    # user of the file handle.
+                    # Translate the handle into a path.
+                    fh = self.file_handler[handle]
                     
-                    path = fh.path
-                    length = fh.length()
+                    if fh.user == host:
                     
-                    self.log("comment", "", "")
-                    self.log("comment", path, "")
-                    self.log("comment", "Length of file: %i" % length, "")
-                    
-                    # Extract the host name from the address as it is assumed that
-                    # communication will be through port 49171.
-                    host = address[0]
-                    
-                    # Start a new thread to request and handle the incoming data.
-                    
-                    # Create a lock to prevent multiple threads working on the
-                    # same file at the same time.
-                    if self.transfers.has_key(path):
-                    
-                        thread, host = self.transfers[path]
+                        # Only receive the file if the host sending it is the
+                        # user of the file handle.
                         
-                        while thread.isAlive():
+                        path = fh.path
+                        length = fh.length()
                         
-                            pass
-                    
-                    # Create an event to use to inform the thread that it terminate.
-                    event = threading.Event()
-                    
-                    # Record the event in the transfer events dictionary.
-                    self.transfer_events[path] = event
-                    
-                    # Create a thread to receive the file.
-                    thread = threading.Thread(
-                        group = None, target = self.receive_file,
-                        name = 'Transfer "%s" from %s:%i' % (
-                            path, address[0], address[1]
-                            ),
-                        args = (
-                            event, reply_id, pos, amount, fh,
-                            _socket, address
+                        self.log("comment", "", "")
+                        self.log("comment", path, "")
+                        self.log("comment", "Length of file: %i" % length, "")
+                        
+                        # Extract the host name from the address as it is assumed that
+                        # communication will be through port 49171.
+                        host = address[0]
+                        
+                        # Start a new thread to request and handle the incoming data.
+                        
+                        # Create a lock to prevent multiple threads working on the
+                        # same file at the same time.
+                        if self.transfers.has_key(path):
+                        
+                            thread, host = self.transfers[path]
+                            
+                            while thread.isAlive():
+                            
+                                pass
+                        
+                        # Create an event to use to inform the thread that it terminate.
+                        event = threading.Event()
+                        
+                        # Record the event in the transfer events dictionary.
+                        self.transfer_events[path] = event
+                        
+                        # Create a thread to receive the file.
+                        thread = threading.Thread(
+                            group = None, target = self.receive_file,
+                            name = 'Transfer "%s" from %s:%i' % (
+                                path, address[0], address[1]
+                                ),
+                            args = (
+                                event, reply_id, pos, amount, fh,
+                                _socket, address
+                                )
                             )
-                        )
-                    
-                    # Record the thread in the transfers dictionary.
-                    self.transfers[path] = thread, host
-                    
-                    # Start the thread.
-                    thread.start()
-                    
-                    # Also notify the other client that the share has been updated.
+                        
+                        # Record the thread in the transfers dictionary.
+                        self.transfers[path] = thread, host
+                        
+                        # Start the thread.
+                        thread.start()
+                        
+                        # Also notify the other client that the share has been updated.
                 
+                except KeyError:
+                
+                    msg = ["E"+reply_id, 0x100d6, "Not found"]
+                    
+                    # Send a reply.
+                    self._send_list(msg, _socket, address)
+            
             #elif code == 0xe:
             #
             #    # Set length of file.
@@ -5611,8 +5647,8 @@ class Peer(Ports):
     
     def stop(self):
     
-        print "Terminating the listening thread"
         # Terminate the listening thread.
+        sys.stdout.write("Terminating the listening thread\n")
         self.listen_event.set()
         
         # Wait until the thread terminates.
@@ -5627,8 +5663,9 @@ class Peer(Ports):
         for path, (thread, host) in self.transfers.items():
         
             # Only terminate threads for shares on this host.
-            print "Terminating thread for transfer from %s to %s" % \
-                (host, path)
+            sys.stdout.write(
+                "Terminating thread for transfer from %s to %s\n" % (host, path)
+                )
             
             # We may wish to avoid doing this to prevent incomplete
             # transfers; we could wait until they have all finished.
@@ -5646,7 +5683,7 @@ class Peer(Ports):
             # Only terminate threads for shares on this host.
             if host == Hostaddr:
             
-                print "Terminating thread for share: %s" % name
+                sys.stdout.write("Terminating thread for share: %s\n" % name)
                 self.shares[(name, host)].event.set()
                 
                 thread = self.shares[(name, host)].thread
@@ -5663,7 +5700,7 @@ class Peer(Ports):
             # Only terminate threads for shares on this host.
             if host == Hostaddr:
             
-                print "Terminating thread for printer: %s" % name
+                sys.stdout.write("Terminating thread for printer: %s\n" % name)
                 self.printers[(name, host)].event.set()
                 
                 thread = self.printers[(name, host)].thread
@@ -5673,14 +5710,23 @@ class Peer(Ports):
                 
                     pass
         
-        print "Terminating the polling thread"
         # Terminate the polling thread.
+        sys.stdout.write("Terminating the polling thread\n")
         self.poll_event.set()
         
         # Wait until the thread terminates.
         while self.poll_thread.isAlive():
         
             pass
+        
+        # Close all open files.
+        sys.stdout.write("Closing files\n")
+        
+        for handle, fh in self.file_handler.items():
+        
+            fh.close()
+        
+        sys.stdout.write("Finished\n")
     
     def fwshow(self):
     
@@ -5691,45 +5737,51 @@ class Peer(Ports):
         
         if self.clients != {}:
         
-            print "Type 5 (Hosts)"
+            sys.stdout.write("Type 5 (Hosts)\n")
             
             for (name, host), info in self.clients.items():
             
                 marker = [" ", "*"][host == Hostaddr]
                 
-                print string.expandtabs(
-                    "   %sName=%s\tHolder=%s" % (marker, name, host), 12
+                sys.stdout.write(
+                    string.expandtabs(
+                        "   %sName=%s\tHolder=%s\n" % (marker, name, host), 12
+                        )
                     )
             
-            print
+            sys.stdout.write("\n")
         
         if self.shares != {}:
         
-            print "Type 1 (Discs)"
+            sys.stdout.write("Type 1 (Discs)\n")
             
             for (name, host) in self.shares.keys():
             
                 marker = [" ", "*"][host == Hostaddr]
                 
-                print string.expandtabs(
-                    "   %sName=%s\tHolder=%s" % (marker, name, host), 12
+                sys.stdout.write(
+                    string.expandtabs(
+                        "   %sName=%s\tHolder=%s\n" % (marker, name, host), 12
+                        )
                     )
             
-            print
+            sys.stdout.write("\n")
         
         if self.printers != {}:
         
-            print "Type 2 (Printers)"
+            sys.stdout.write("Type 2 (Printers)\n")
             
             for (name, host) in self.printers.keys():
             
                 marker = [" ", "*"][host == Hostaddr]
                 
-                print string.expandtabs(
-                    "   %sName=%s\tHolder=%s" % (marker, name, host), 12
+                sys.stdout.write(
+                    string.expandtabs(
+                        "   %sName=%s\tHolder=%s\n" % (marker, name, host), 12
+                        )
                     )
             
-            print
+            sys.stdout.write("\n")
     
     def add_share(self, name, directory, mode = 0644, delay = 30,
                   present = "truncate", filetype = DEFAULT_FILETYPE):
@@ -5943,3 +5995,35 @@ class Peer(Ports):
         else:
         
             return None
+
+
+if __name__ == "__main__":
+
+    # Start the peer which will automatically create shares and printers
+    # from a suitable .access configuration file.
+    sys.stdout.write("Starting...\n")
+    
+    p = Peer()
+    
+    DEBUG = 0
+    
+    sys.stdout.write("Started sharing\n")
+    
+    # Wait until interrupted by the user.
+    try:
+    
+        while 1:
+        
+            pass
+    
+    except KeyboardInterrupt:
+    
+        pass
+    
+    sys.stdout.write("Shutting down:\n")
+    
+    # Shut down the peer cleanly.
+    p.stop()
+    
+    # Exit
+    sys.exit()
