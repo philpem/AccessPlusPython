@@ -14,8 +14,8 @@ DEFAULT_SUFFIX = os.extsep + "txt"
 # Find the number of centiseconds between 1900 and 1970.
 between_epochs = ((365 * 70) + 17) * 24 * 360000
 
-RECV_SIZE = 8192
-SEND_SIZE = 8192
+RECV_SIZE = 32768
+SEND_SIZE = 32768
 
 
 class Common:
@@ -529,6 +529,8 @@ class Common:
     
     def log(self, direction, data, address):
     
+        if self.debug == 0: return
+        
         if direction[0] == "s":
         
             self._log.append("Sent to %s:%i" % address)
@@ -783,7 +785,6 @@ class File:
         self.pieces.append( (self.ptr, data) )
         self.ptr = self.ptr + len(data)
         self.length = max(self.ptr, self.length)
-        print self.ptr
     
     def length(self):
     
@@ -808,8 +809,6 @@ class File:
         
             return
         
-        print self.path, self._length
-        
         try:
         
             # Zero the contents of the file.
@@ -828,8 +827,9 @@ class File:
                 f.write(data)
             
             f.flush()
+            
             # Truncate the file.
-            #f.truncate(self._length)
+            f.truncate(self._length)
             
             f.close()
         
@@ -910,8 +910,9 @@ class Unused(Common):
 
 class Peer(Common):
 
-    def __init__(self):
+    def __init__(self, debug = 1):
     
+        self.debug = 1
         # ---------------------------------------------------------------------
         # Read configuration files
         
@@ -1461,7 +1462,7 @@ class Peer(Common):
                         
                         fh.seek(data_pos, 0)
                         
-                        self.log("comment", file_data, "")
+                        #self.log("comment", file_data, "")
                         
                         fh.write(file_data)
                         pos = data_pos + len(file_data)
@@ -2158,7 +2159,7 @@ class Peer(Common):
                 # Find the relevant file.
                 path = self.find_relevant_file(path)
                 
-                print "Delete request:", path
+                self.log("comment", "Delete request: %s" % path, "")
                 
                 # Construct access attributes for the other client.
                 access_attr = self.to_riscos_access(path = path)
@@ -2414,7 +2415,7 @@ class Peer(Common):
                 # Determine the correct suffix to use for the file.
                 new_path = self.filetype_to_suffix(ros_path, filetype)
                 
-                #print "%s -> %s" % (fh.path, new_path)
+                self.log("comment", "Renaming %s to %s" % (fh.path, new_path), "")
                 
                 if fh.path != new_path:
                 
@@ -2791,8 +2792,17 @@ class Peer(Common):
             
             if (time.time() - t0) > 60.0:
             
-                # Reset the timer and prune the list of handles.
+                # Reset the timer and prune the list of transfers.
                 t0 = time.time()
+                
+                items in self.transfers.items()
+                
+                if path, thread in items:
+                
+                    if not thread.isAlive():
+                    
+                        del self.transfers[path]
+                        del self.transfer_events[path]
             
             if event.isSet(): return
     
