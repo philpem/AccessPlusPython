@@ -114,7 +114,7 @@ class Common:
         
         else:
         
-            self._id = self._id + 1
+            self._id = self._id + 0x1001
             if self._id > 0xffffff:
                 self._id = 1
         
@@ -190,12 +190,15 @@ class Access(Common):
 
     def __init__(self):
     
+        # ---------------------------------------------------------------------
+        # Socket configuration
+        
         # Define a global hostname variable to represent this machine on the local
         # subnet.
         
         self.hostname = socket.gethostname()
         
-        self.hostaddr = socket.gethostbyaddr(self.hostname)[2][0]
+        self.hostaddr = socket.gethostbyname(self.hostname)
         
         at = string.rfind(self.hostaddr, ".")
         
@@ -225,6 +228,8 @@ class Access(Common):
         # Create sockets to use for share details.
         self._create_share_sockets()
         
+        # ---------------------------------------------------------------------
+        # Thread configuration
         
         # Create an event to use to terminate the polling thread.
         self.poll_event = threading.Event()
@@ -233,12 +238,26 @@ class Access(Common):
         # access object.
         self.poll_thread = threading.Thread(
             group = None, target = self.broadcast_poll,
-            name = "Poller", args = (self.poll_event,),
-            kwargs = {"delay": 10}
+            name = "Poller", args = (self.poll_event,)
             )
         
-        # Maintain a dictionary of known shares and printers. Each of
-        # these will use a separate thread.
+        # Create an event to use to inform the listening thread that it
+        # must terminate.
+        self.listen_event = threading.Event()
+        
+        # Create a thread to use to listen for packets sent directly to
+        # our machine.
+        self.listen_thread = threading.Thread(
+            group = None, target = self.listen,
+            name = "Listener", args = (self.listen_event,)
+            )
+        
+        # ---------------------------------------------------------------------
+        # Resources configuration
+        
+        # Maintain a dictionary of known clients, shares and printers.
+        # Each of these will use a separate thread.
+        self.clients = {}
         self.shares = {}
         self.printers = {}
         
@@ -292,7 +311,7 @@ class Access(Common):
         # Set the socket to be non-blocking.
         self._poll_l.setblocking(0)
         
-        self._poll_l.bind((self.hostname, 32770))
+        self._poll_l.bind((self.hostaddr, 32770))
         
         self.ports[32770] = self._poll_l
     
@@ -316,7 +335,7 @@ class Access(Common):
         # Set the socket to be non-blocking.
         self._listen_l.setblocking(0)
         
-        self._listen_l.bind((self.hostname, 32771))
+        self._listen_l.bind((self.hostaddr, 32771))
         
         self.ports[32771] = self._listen_l
     
@@ -340,7 +359,7 @@ class Access(Common):
         # Set the socket to be non-blocking.
         self._share_l.setblocking(0)
         
-        self._share_l.bind((self.hostname, 49171))
+        self._share_l.bind((self.hostaddr, 49171))
         
         self.ports[49171] = self._share_l
     
@@ -482,7 +501,7 @@ class Access(Common):
         
         self._send_list(data, s, (self.broadcast, 32770))
     
-    def broadcast_poll(self, event, delay = 20):
+    def broadcast_poll(self, event, delay = 30):
     
         """broadcast_poll(self)
         
@@ -506,21 +525,15 @@ class Access(Common):
         
         while 1:
         
-            t0 = time.time()
-            
             self._send_list(data, s, (self.broadcast, 32770))
             
-            while int(time.time() - t0) < delay:
+            time.sleep(delay)
             
-                # Read any response.
-                response = self.read_poll_socket()
-                response = self.read_share_socket()
-                
-                if event.isSet(): return
+            if event.isSet(): return
     
-    def broadcast_share(self, name, event, protected = 0, delay = 10):
+    def broadcast_share(self, name, event, protected = 0, delay = 30):
     
-        """broadcast_share(self, name, event, protected = 0, delay = 10)
+        """broadcast_share(self, name, event, protected = 0, delay = 30)
         
         Broadcast the availability of a share every few seconds.
         """
@@ -554,18 +567,31 @@ class Access(Common):
         # Create a string to send.
         data = [0x00000046, 0x00000013, 0x00000000]
         
-        while 1:
+        # Broadcast a notification to other clients.
         
-            t0 = time.time()
-            
+        for i in range(0, 5):
+        
             self._send_list(data, s, (self.broadcast, 49171))
             
-            while int(time.time() - t0) < delay:
+            time.sleep(1)
+        
+        # Remind other clients of the availability of this share.
+        
+        s = self.broadcasters[32770]
+        
+        data = \
+        [
+            0x00010004, 0x00010000, 0x00010000 | len(name),
+            name + chr(protected & 1)
+        ]
+        
+        while 1:
+        
+            self._send_list(data, s, (self.broadcast, 32770))
             
-                # Read any response.
-                #response = self.read_share_socket()
-                
-                if event.isSet(): return
+            time.sleep(delay)
+            
+            if event.isSet(): return
         
         # Broadcast that the share has now been removed.
         
@@ -578,10 +604,10 @@ class Access(Common):
         ]
     
     def broadcast_printer(self, name, description, event,
-                          protected = 0, delay = 2):
+                          protected = 0, delay = 30):
     
         """broadcast_share(self, name, description, event,
-                           protected = 0, delay = 2)
+                           protected = 0, delay = 30)
         
         Broadcast the availability of a printer every few seconds.
         """
@@ -639,6 +665,66 @@ class Access(Common):
             name + chr(protected & 1)
         ]
     
+    def broadcast_directory_share(self, name, event, protected = 0, delay = 30):
+    
+        """broadcast_share(self, name, event, protected = 0, delay = 30)
+        
+        Broadcast the availability of a share every few seconds.
+        """
+        
+        # Broadcast the availability of the share on the polling socket.
+        
+        if not self.broadcasters.has_key(32771):
+        
+            print "No socket to use for port %i" % 32771
+            return
+        
+        s = self.broadcasters[32771]
+        
+        data = \
+        [
+            0x00010002, 0x00010001, 0x00000000
+        ]
+        
+        self._send_list(data, s, (self.broadcast, 32771))
+        
+        # Advertise the share on the share socket.
+        
+        if not self.broadcasters.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return
+        
+        s = self.broadcasters[49171]
+        
+        # Create a string to send.
+        data = [0x00000046, 0x00000013, 0x00000000]
+        
+        # Broadcast a notification to other clients.
+        
+        for i in range(0, 5):
+        
+            self._send_list(data, s, (self.broadcast, 49171))
+            
+            time.sleep(1)
+        
+        while 1:
+        
+            self._send_list(data, s, (self.broadcast, 32770))
+            
+            time.sleep(delay)
+            
+            if event.isSet(): return
+        
+        # Broadcast that the share has now been removed.
+        
+        s = self.broadcasters[32771]
+        
+        data = \
+        [
+            0x00010003, 0x00010001, 0x00000000
+        ]
+    
     def send_query(self, host):
     
         if not self.broadcasters.has_key(32770):
@@ -662,26 +748,40 @@ class Access(Common):
     
     def read_poll_socket(self):
     
-        if not self.ports.has_key(32770):
+        # Read the listening socket first.
+        try:
         
-            print "No socket to use for port %i" % 32770
-            return
+            s = self.ports[32770]
+            data, address = s.recvfrom(1024)
+            
+            self._read_poll_socket(data, address)
         
-        s = self.ports[32770]
+        except (KeyError, socket.error):
+        
+            if sys.exc_info()[1].args[0] == 11:
+            
+                pass
         
         try:
         
+            s = self.broadcasters[32770]
             data, address = s.recvfrom(1024)
+            
+            self._read_poll_socket(data, address)
         
-        except socket.error:
+        except (KeyError, socket.error):
         
             if sys.exc_info()[1].args[0] == 11:
             
                 pass
             
             return None
-        
+    
+    def _read_poll_socket(self, data, address):
+    
         print "From: %s:%i" % address
+        
+        host = address[0]
         
         # Check the first word of the response to determine what the
         # information is about.
@@ -690,13 +790,16 @@ class Access(Common):
         major = (about & 0xffff0000) >> 16
         minor = about & 0xffff
         
-        # The second word of the response has an unknown meaning.
+        # The second word of the response is the type of share.
+        share_type = self.str2num(4, data[4:8])
         
-        if self.str2num(4, data[4:8]) != 0:
+        if share_type != 0:
         
             # The third word contains two half-word length values.
             length1 = self.str2num(2, data[8:10])
             length2 = self.str2num(2, data[10:12])
+        
+        # Type 1 (Discs)
         
         if major == 0x0001:
         
@@ -711,18 +814,33 @@ class Access(Common):
             
                 # Share made available
                 
-                # A string follows the leading three words.
-                share_name = data[12:12+length1]
+                if share_type == 0x00010000:
                 
-                c = 12 + length1
+                    # A string follows the leading three words.
+                    share_name = data[12:12+length1]
+                    
+                    c = 12 + length1
+                    
+                    # The protected flag follows the last byte in the string.
+                    protected = self.str2num(length2, data[c:c+length2])
+                    
+                    if protected not in [0, 1]: protected = 0
+                    
+                    print 'Share "%s" (%s) available' % \
+                        (share_name, ["unprotected", "protected"][protected])
+                    
+                    # Compare the share with those recorded.
+                    
+                    if not self.shares.has_key((share_name, host)):
+                    
+                        # Add the share share_name and host to the shares dictionary.
+                        self.shares[(share_name, host)] = (None, None)
                 
-                # The protected flag follows the last byte in the string.
-                protected = self.str2num(length2, data[c:c+length2])
+                elif share_type == 0x00010001:
                 
-                if protected not in [0, 1]: protected = 0
-                
-                print 'Share "%s" (%s) available' % \
-                    (share_name, ["unprotected", "protected"][protected])
+                    # A directory share
+                    
+                    pass
             
             elif minor == 0x0003:
             
@@ -740,6 +858,14 @@ class Access(Common):
                 
                 print 'Share "%s" (%s) withdrawn' % \
                     (share_name, ["unprotected", "protected"][protected])
+                
+                # Compare the share with those recorded.
+                
+                if self.shares.has_key((share_name, host)):
+                
+                    # Remove the share share_name and host from the shares
+                    # dictionary.
+                    del self.shares[(share_name, host)]
             
             elif minor == 0x0004:
             
@@ -757,6 +883,13 @@ class Access(Common):
                 
                 print 'Share "%s" (%s)' % \
                     (share_name, ["unprotected", "protected"][protected])
+                
+                # Compare the share with those recorded.
+                
+                if not self.shares.has_key((share_name, host)):
+                
+                    # Add the share name and host to the shares dictionary.
+                    self.shares[(share_name, host)] = (None, None)
             
             else:
             
@@ -765,6 +898,8 @@ class Access(Common):
                 for line in lines:
                 
                     print line
+        
+        # Type 2 (Printers)
         
         elif major == 0x0002:
         
@@ -785,6 +920,13 @@ class Access(Common):
                 
                 print 'Printer "%s" (%s) available' % \
                     (printer_name, printer_desc)
+                
+                # Compare the printer with those recorded.
+                
+                if not self.printer.has_key((name, host)):
+                
+                    # Add the printer name and host to the printers dictionary.
+                    self.printers[(name, host)] = (None, None)
             
             elif minor == 0x0003:
             
@@ -801,6 +943,14 @@ class Access(Common):
                 
                 print 'Printer "%s" (%s) withdrawn' % \
                     (printer_name, printer_desc)
+                
+                # Compare the printer with those recorded.
+                
+                if self.printers.has_key((name, host)):
+                
+                    # Remove the printer name and host from the printers
+                    # dictionary.
+                    del self.printers[(name, host)]
             
             elif minor == 0x0004:
             
@@ -825,6 +975,8 @@ class Access(Common):
                 for line in lines:
                 
                     print line
+        
+        # Type 5 (Hosts)
         
         elif major == 0x0005:
         
@@ -879,6 +1031,13 @@ class Access(Common):
                 info = data[c:c+length2]
                 
                 print "Client available: %s %s" % (client_name, info)
+                
+                # Compare the client with those in the clients dictionary.
+                
+                if not self.clients.has_key((client_name, host)):
+                
+                    # Add an entry for the client to the dictionary.
+                    self.clients[(client_name, host)] = info
             
             else:
             
@@ -895,28 +1054,85 @@ class Access(Common):
             
                 print line
     
-    def read_share_socket(self):
+    def read_listener_socket(self):
     
-        if not self.ports.has_key(49171):
+        # Read the listening socket first.
+        try:
         
-            print "No socket to use for port %i" % 49171
-            return
+            s = self.ports[32771]
+            data, address = s.recvfrom(1024)
+            
+            self._read_listener_socket(data, address)
         
-        s = self.ports[49171]
+        except (KeyError, socket.error):
+        
+            if sys.exc_info()[1].args[0] == 11:
+            
+                pass
         
         try:
         
+            s = self.broadcasters[32771]
             data, address = s.recvfrom(1024)
+            
+            self._read_listener_socket(data, address)
         
-        except socket.error:
+        except (KeyError, socket.error):
         
             if sys.exc_info()[1].args[0] == 11:
             
                 pass
             
             return None
-        
+    
+    def _read_listener_socket(self, data, address):
+    
         print "From: %s:%i" % address
+        
+        host = address[0]
+        
+        lines = self.interpret(data)
+        
+        for line in lines:
+        
+            print line
+        
+        print
+    
+    def read_share_socket(self):
+    
+        # Read the listening socket first.
+        try:
+        
+            s = self.ports[49171]
+            data, address = s.recvfrom(1024)
+            
+            self._read_share_socket(s, data, address)
+        
+        except socket.error:
+        
+            if sys.exc_info()[1].args[0] == 11:
+            
+                pass
+        
+        try:
+        
+            s = self.broadcasters[49171]
+            data, address = s.recvfrom(1024)
+            
+            self._read_share_socket(s, data, address)
+        
+        except socket.error:
+        
+            if sys.exc_info()[1].args[0] == 11:
+            
+                pass
+    
+    def _read_share_socket(self, _socket, data, address):
+    
+        print "From: %s:%i" % address
+        
+        host = address[0]
         
         if data[0] == "A":
         
@@ -927,14 +1143,14 @@ class Access(Common):
             
             print 'Request to open "%s"' % share_name
             
-            if self.shares.has_key(share_name):
+            if self.shares.has_key((share_name, self.hostaddr)):
             
                 # For unprotected shares, reply with details of the share.
                 
                 # Use the first word given but substitute "R" for "A".
                 self._send_list(
-                    ["R"+data[1:4], 0xffffcd00, 0, 0x800, 0x13, 0x102, 0x027cab01],
-                    s, address
+                    ["R"+data[1:4], 0xffffcd00, 0, 0x800, 0x13, 0x102, 0],
+                    _socket, address
                     )
             
             else:
@@ -942,10 +1158,10 @@ class Access(Common):
                 # Reply with an error message.
                 self._send_list(
                     ["E"+data[1:4], 0x163ac, "Shared disc not available."],
-                    s, address
+                    _socket, address
                     )
         
-        elif data[0] == "B":
+        elif data[0] == "B" and self.str2num(4, data[4:8]) == 0x3:
         
             # Request for information.
             
@@ -955,19 +1171,13 @@ class Access(Common):
             
             print 'Request to catalogue "%s"' % share_name
             
-            if self.shares.has_key(share_name):
+            try:
             
                 # For unprotected shares, return a catalogue to the client.
                 
-                thread, direct = self.shares[share_name]
+                thread, direct = self.shares[(share_name, self.hostaddr)]
                 
-                try:
-                
-                    files = os.listdir(direct)
-                
-                except OSError:
-                
-                    files = []
+                files = os.listdir(direct)
                 
                 # Write the message, starting with the code and ID word.
                 msg = ["S"+data[1:4]]
@@ -985,15 +1195,17 @@ class Access(Common):
                 msg.append("$")
                 dir_length = dir_length + 4
                 
+                n_files = 0
+                
                 for file in files:
                 
                     file_msg = []
                     length = 0
                     
+                    path = os.path.join(direct, file)
+                    
                     try:
                     
-                        path = os.path.join(direct, file)
-                        
                         # Filetype word
                         if os.path.isdir(path):
                         
@@ -1048,6 +1260,8 @@ class Access(Common):
                         file_msg.append(name_string)
                         
                         length = length + len(name_string)
+                        
+                        n_files = n_files + 1
                     
                     except OSError:
                     
@@ -1071,17 +1285,22 @@ class Access(Common):
                 # Fill in the directory length.
                 msg[1] = dir_length
                 
-                print msg
+                print
+                print "Sent: %i files" % n_files
+                for line in self.interpret(self._encode(msg)):
+                
+                    print line
+                print
                 
                 # Send the reply.
-                self._send_list(msg, s, address)
+                self._send_list(msg, _socket, address)
             
-            else:
+            except (KeyError, OSError):
             
                 # Reply with an error message.
                 self._send_list(
                     ["E"+data[1:4], 0x163ac, "Shared disc not available."],
-                    s, address
+                    _socket, address
                     )
         
         elif data[0] == "R":
@@ -1098,6 +1317,11 @@ class Access(Common):
         
             # Error response to a request.
             self.share_messages.append(data)
+            
+            print "%s (%i)" % (
+                self.read_string(data[8:], ending = "\000", include = 0),
+                self.str2num(4, data[4:8])
+                )
         
         lines = self.interpret(data)
         
@@ -1106,7 +1330,18 @@ class Access(Common):
             print line
         
         print
+    
+    def listen(self, event):
+    
+        while 1:
         
+            # Read any response.
+            response = self.read_poll_socket()
+            respones = self.read_listener_socket()
+            response = self.read_share_socket()
+            
+            if event.isSet(): return
+    
     def serve(self):
     
         """serve(self)
@@ -1119,6 +1354,9 @@ class Access(Common):
         
         # Start the polling thread.
         self.poll_thread.start()
+        
+        # Start the listening thread.
+        self.listen_thread.start()
         
         return
         
@@ -1140,17 +1378,30 @@ class Access(Common):
     
     def stop(self):
     
+        print "Terminating the listening thread"
+        # Terminate the listening thread.
+        self.listen_event.set()
+        
+        # Wait until the thread terminates.
+        while self.listen_thread.isAlive():
+        
+            pass
+        
         # Terminate all threads.
-        for name, (thread, directory) in self.shares.items():
+        for (name, host), (thread, directory) in self.shares.items():
         
-            print "Terminating thread for share: %s" % name
-            self.share_events[name].set()
+            # Only terminate threads for shares on this host.
+            if host == self.hostaddr:
             
-            # Wait until the thread terminates.
-            while thread.isAlive():
-            
-                pass
+                print "Terminating thread for share: %s" % name
+                self.share_events[name].set()
+                
+                # Wait until the thread terminates.
+                while thread.isAlive():
+                
+                    pass
         
+        print "Terminating the polling thread"
         # Terminate the polling thread.
         self.poll_event.set()
         
@@ -1159,14 +1410,63 @@ class Access(Common):
         
             pass
     
-    def add_share(self, name, directory, protected = 0, delay = 10):
+    def fwshow(self):
     
-        """add_share(self, name, directory, protected = 0)
+        """fwshow(self)
+        
+        Show a list of known clients and their shared resources.
+        """
+        
+        if self.clients != {}:
+        
+            print "Type 5 (Hosts)"
+            
+            for (name, host), info in self.clients.items():
+            
+                marker = [" ", "*"][host == self.hostaddr]
+                
+                print string.expandtabs(
+                    "   %sName=%s\tHolder=%s" % (marker, name, host), 12
+                    )
+            
+            print
+        
+        if self.shares != {}:
+        
+            print "Type 1 (Discs)"
+            
+            for (name, host) in self.shares.keys():
+            
+                marker = [" ", "*"][host == self.hostaddr]
+                
+                print string.expandtabs(
+                    "   %sName=%s\tHolder=%s" % (marker, name, host), 12
+                    )
+            
+            print
+        
+        if self.printers != {}:
+        
+            print "Type 2 (Printers)"
+            
+            for (name, host) in self.printers.keys():
+            
+                marker = [" ", "*"][host == self.hostaddr]
+                
+                print string.expandtabs(
+                    "   %sName=%s\tHolder=%s" % (marker, name, host), 12
+                    )
+            
+            print
+    
+    def add_share(self, name, directory, protected = 0, delay = 30):
+    
+        """add_share(self, name, directory, protected = 0, delay = 30)
         
         Add the named share to the shares available to other hosts.
         """
         
-        if self.shares.has_key(name):
+        if self.shares.has_key((name, self.hostaddr)):
         
             print "Share is already available: %s" % name
             return
@@ -1184,7 +1484,7 @@ class Access(Common):
             kwargs = {"protected": protected, "delay": delay}
             )
         
-        self.shares[name] = (thread, directory)
+        self.shares[(name, self.hostaddr)] = (thread, directory)
         
         # Start the thread.
         thread.start()
@@ -1196,7 +1496,7 @@ class Access(Common):
         Remove the named share from the shares available to other hosts.
         """
         
-        if not self.shares.has_key(name):
+        if not self.shares.has_key((name, self.hostaddr)):
         
             print "Share is not currently available: %s" % name
             return
@@ -1204,14 +1504,15 @@ class Access(Common):
         # Set the relevant event object's flag.
         self.share_events[name].set()
         
+        thread, directory = self.shares[(name, self.hostaddr)]
+        
         # Wait until the thread terminates.
-        thread, directory = self.shares[name]
         while thread.isAlive():
         
             pass
         
         # Remove the thread and the event from their respective dictionaries.
-        del self.shares[name]
+        del self.shares[(name, self.hostaddr)]
         del self.share_events[name]
     
     def add_printer(self, name):
@@ -1221,7 +1522,7 @@ class Access(Common):
         Make the named printer available to other hosts.
         """
         
-        if self.printers.has_key(name):
+        if self.printers.has_key((name, self.hostaddr)):
         
             print "Printer is already available: %s" % name
             return
@@ -1239,7 +1540,7 @@ class Access(Common):
             kwargs = {"protected": protected, "delay": delay}
             )
         
-        self.printers[name] = thread
+        self.printers[(name, self.hostaddr)] = thread
         
         # Start the thread.
         thread.start()
@@ -1251,7 +1552,7 @@ class Access(Common):
         Withdraw the named printer from service.
         """
         
-        if not self.printers.has_key(name):
+        if not self.printers.has_key((name, self.hostaddr)):
         
             print "Printer is not currently available: %s" % name
             return
@@ -1260,12 +1561,12 @@ class Access(Common):
         self.printer_events[name].set()
         
         # Wait until the thread terminates.
-        while self.printers[name].isAlive():
+        while self.printers[(name, self.hostaddr)].isAlive():
         
             pass
         
         # Remove the thread and the event from their respective dictionaries.
-        del self.printers[name]
+        del self.printers[(name, self.hostaddr)]
         del self.printer_events[name]
     
     def open_share(self, name, host):
@@ -1367,7 +1668,6 @@ class Access(Common):
                 
                 elif data[:4] == "E"+new_id:
                 
-                    print 'Error: "%s"' % data[8:]
                     self.share_messages.remove(data)
                     
                     return []
@@ -1386,14 +1686,17 @@ class Access(Common):
         c = c + 4
         
         lines = []
+        files = []
         
         while c < (start + dir_length):
         
             # Filetype word
-            filetype = (self.str2num(4, data[c:c+4]) & 0xfff00) >> 8
+            filetype_word = self.str2num(4, data[c:c+4])
+            filetype = (filetype_word & 0xfff00) >> 8
             c = c + 4
             
             # Unknown word
+            unknown = self.str2num(4, data[c:c+4])
             c = c + 4
             
             # Length word (0x800 for directory)
@@ -1419,6 +1722,7 @@ class Access(Common):
             
                 c = c + 4 - (c % 4)
             
+            files.append( (filetype_word, unknown, length, flags1, flags2, name) )
             lines.append(
                 "%s: %03x (%i bytes) %i %i" % (
                     name, filetype, length, flags1, flags2
@@ -1430,5 +1734,50 @@ class Access(Common):
         # open request but with a "B" command word like a
         # catalogue request.
         
+        # Follow up with another directory request.
+        
+        #new_id = self.new_id()
+        
+        # Include the directory length returned from the other client in
+        # the next request. This was found from the other client's follow
+        # up requests to our client for directory information.
+        # Presumably, this indicates that a certain amount of space has
+        # been reserved for the data.
+        #word = files[0][0]
+        #print hex(word)
+        
+        new_id = self.number(3, self._id ^ 0x7007)
+        
+        data = ["B"+new_id, 0xd, dir_length, 0, 0x801]
+        
+        print "Sent:"
+        for line in self.interpret(self._encode(data)):
+        
+            print line
+        print
+        
+        self._send_list(data, s, (host, 49171))
+        
+        replied = 0
+        while replied == 0:
+        
+            # See if the response has arrived.
+            for data in self.share_messages:
+            
+                if data[:4] == "S"+new_id:
+                
+                    self.share_messages.remove(data)
+                    
+                    # Catalogue information was returned.
+                    self.open_shares[(name, host)] = new_id
+                    replied = 1
+                    
+                    break
+                
+                elif data[:4] == "E"+new_id:
+                
+                    self.share_messages.remove(data)
+                    
+                    return []
         
         return lines
