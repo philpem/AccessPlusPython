@@ -8,7 +8,7 @@ setup(
     author="David Boddie",
     author_email="david@boddie.org.uk",
     url="http://www.boddie.org.uk/david/Projects/Python/Access+",
-    version="0.10",
+    version="0.15",
     py_modules=["access"],
     scripts=["accessweb.py"]
     )
