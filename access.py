@@ -25,6 +25,8 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
 
+__version__ = "0.27"
+
 import glob, os, string, socket, sys, threading, time, types
 
 if not os.__dict__.has_key("extsep"):
