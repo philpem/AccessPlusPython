@@ -16,3 +16,25 @@ B<id> 0xb <handle> 0 <length>
 
     This may be a complaint by the other client about the information
     on an object we gave it following an "A" 1 request.
+    
+    From: 192.168.0.3:49171
+    5addb041 00000001 00000000 69766164 : A..Z........davi
+    68432e64 6563696f 6c432e73 2e6b636f : d.Choices.Clock.
+    72616c61 782f736d 00006c6d          : alarms/xml.
+    
+    Sent:
+    5addb052 fffffd4b e01b3ac4 00000044 : R..ZK....:..D...
+    00000003 00000001 0004f8a1          : ............
+    
+    From: 192.168.0.3:49171
+    5afdb242 0000000b 0004f8a1 00000000 : B..Z............
+    00000044                            : D...
+
+
+    It turned out that the value of 0x00000001 was not received well by the
+    other client. A value of 0x0101 caused it to send a message with 0x400
+    as the last word. If we send this message, we obtain an "S" response
+    with this word as the second in the message followed by 0x0000000c
+    then a block of data.
+
+    
