@@ -149,13 +149,13 @@ PrintShareName = print_share_name(Hostaddr)
 class Common:
 
     def str2num(self, size, s):
-        """Convert a string of decimal digits to an integer."""
+        """Convert a string of decimal digits to an positive integer."""
         
         i = 0
-        n = 0
+        n = 0L
         while i < size:
         
-            n = n | (ord(s[i]) << (i*8))
+            n = n | (long(ord(s[i])) << (i*8))
             i = i + 1
         
         return n
@@ -327,8 +327,8 @@ class Common:
     
     def _make_riscos_filetype_date(self, filetype, cs):
     
-        filetype_word = int(
-            0xfff00000 | (filetype << 8) | \
+        filetype_word = long(
+            0xfff00000L | (filetype << 8) | \
             (long(cs & 0xff00000000L) >> 32)
             )
         
@@ -376,13 +376,30 @@ class Ports(Common):
     broadcasters = {32770: None, 32771: None, 49171: None}
     ports = {32770: None, 32771: None, 49171: None}
     
-    def __init__(self):
+    access_plus = None
     
+    def __init__(self, access_plus = 1):
+    
+        # This class is subclassed by many other classes and its
+        # functionality used by many instances, yet all share the
+        # same socket objects, therefore we must record the options
+        # set when the class is first instantiated and prevent
+        # subsequent operations from overriding them.
+        
+        if Ports.access_plus is None:
+        
+            Ports.access_plus = access_plus
+        
+        
         # Create sockets to use for polling.
         self._create_poll_sockets()
         
-        # Create sockets to use for listening.
-        self._create_listener_sockets()
+        if Ports.access_plus == 1:
+        
+            # Create sockets to use for listening.
+            self._create_listener_sockets()
+        
+        self.access_plus = access_plus
         
         # Create sockets to use for share details.
         self._create_share_sockets()
@@ -2078,7 +2095,7 @@ class Share(Ports, Translate):
                 # Use the file object's length, if possible.
                 length = fh.length()
             
-            return [ 0xdeaddead, 0xdeaddead, length, 0x33, object_type,
+            return [ 0xdeaddeadL, 0xdeaddeadL, length, 0x33, object_type,
                      handle ], path
         
         else:
@@ -2383,8 +2400,8 @@ class Share(Ports, Translate):
                 # Convert this to the RISC OS date format.
                 cs = self.to_riscos_time(seconds = seconds)
                 
-                filetype_word = int(
-                    0xfff00000 | (filetype << 8) | \
+                filetype_word = long(
+                    0xfff00000L | (filetype << 8) | \
                     ((cs & 0xff00000000L) >> 32)
                     )
                 
@@ -2393,7 +2410,7 @@ class Share(Ports, Translate):
                 length = length + 4
                 
                 # Date word
-                file_info.append(cs & 0xffffffff)
+                file_info.append(cs & 0xffffffffL)
                 length = length + 4
                 
                 # Length word (0x800 for directory)
@@ -2452,19 +2469,19 @@ class Share(Ports, Translate):
         # catalogue request.
         
         # Use the inode of the directory as its handle.
-        handle = os.stat(path)[os.path.stat.ST_INO] & 0xffffffff
+        handle = os.stat(path)[os.path.stat.ST_INO] & 0xffffffffL
         
-        share_value = (handle & 0xffffff00) ^ 0xffffff02
+        share_value = (handle & 0xffffff00L) ^ 0xffffff02L
         
         trailer = \
         [
-            0xffffcd00,  0x00000000, 0x00000800,
-            0x00000013, # Read only for others (0x10); read write for owner
+            0xffffcd00L, 0x00000000L, 0x00000800L,
+            0x00000013L, # Read only for others (0x10); read write for owner
             share_value, # common value for directories in this share
             handle, # handle of object as with info returned for opening
             dir_length, # number of words used to describe the directory
                         # contents
-            0xffffffff
+            0xffffffffL
         ]
         
         # Fill in the directory length.
@@ -2676,7 +2693,7 @@ class RemoteShare(Ports, Translate):
         
             name = name + "." + ros_path
         
-        msg = ["B", 3, 0xffffffff, 0, name+"\x00"]
+        msg = ["B", 3, 0xffffffffL, 0, name+"\x00"]
         
         # Send the request.
         replied, data = self._send_request(msg, self.host, ["S"])
@@ -3722,10 +3739,19 @@ class Printer(Ports):
 
 class Peer(Ports):
 
-    def __init__(self):
+    def __init__(self, access_plus = 1):
     
         # Call the initialisation method of the base classes.
-        Ports.__init__(self)
+        Ports.__init__(self, access_plus)
+        
+        # Record the ports in use.
+        self.use_ports = []
+        
+        for port, value in self.ports.items():
+        
+            if value is not None:
+            
+                self.use_ports.append(port)
         
         # ---------------------------------------------------------------------
         # Socket configuration
@@ -4162,7 +4188,7 @@ class Peer(Ports):
         
         self._send_list(data, s, (host, 32770))
         
-        self.read_port([32770, 32771, 49171])
+        self.read_port(self.use_ports)
     
     # Method used in thread for transferring files
     
@@ -4458,7 +4484,7 @@ class Peer(Ports):
         # information is about.
         about = self.str2num(4, data[:4]) 
         
-        major = (about & 0xffff0000) >> 16
+        major = (about & 0xffff0000L) >> 16
         minor = about & 0xffff
         
         # The second word of the response is the type of share.
@@ -5622,7 +5648,11 @@ class Peer(Ports):
         
             # Read any response.
             self.read_poll_socket()
-            self.read_listener_socket()
+            
+            if self.access_plus == 1:
+            
+                self.read_listener_socket()
+            
             self.read_share_socket()
             
             if (time.time() - t0) > TIDY_DELAY:
@@ -6017,7 +6047,13 @@ if __name__ == "__main__":
     # from a suitable .access configuration file.
     sys.stdout.write("Starting...\n")
     
-    p = Peer()
+    if "--no-access-plus" in sys.argv:
+    
+        p = Peer(access_plus = 0)
+    
+    else:
+    
+        p = Peer()
     
     DEBUG = 0
     
