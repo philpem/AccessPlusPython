@@ -7,9 +7,7 @@
 import os, string, socket, sys, time, threading, types
 
 
-# Define dummy values to use for constants with the _decode methd.
-# We could use enumerate but this is just as easy as the values will be
-# ignored; their types are the important pieces of information.
+default_filetype = 0xffd
 
 
 class Common:
@@ -252,13 +250,187 @@ class Common:
                 new.append(c)
         
         return string.join(new, "")
+    
+    def read_mimemap(self):
+    
+        # Compile a list of paths to check for the MimeMap file.
+        paths = [""]
+        
+        # Look for a MimeMap file in the path used to invoke this program.
+        path, file = os.path.split(sys.argv[0])
+        paths.append(path)
+        
+        f = None
+        
+        for path in paths:
+        
+            try:
+            
+                f = open(os.path.join(path, "MimeMap"), "r")
+                break
+            
+            except IOError:
+            
+                # Loop again.
+                pass
+        
+        if f is None:
+        
+            print "Failed to find MimeMap file."
+            lines = []
+        
+        else:
+        
+            lines = f.readlines()
+            f.close()
+        
+        mappings = []
+        
+        # Read the lines found.    
+        for line in lines:
+        
+            # Strip trailing whitespace and split the string.
+            s = string.strip(line)
+            
+            values = []
+            current = ""
+            
+            # Ignore lines beginning with a "#" character.
+            if s[:1] == "#": continue
+            
+            for c in s:
+            
+                if c not in string.whitespace:
+                
+                    current = current + c
+                
+                elif current != "":
+                
+                    values.append(current)
+                    current = ""
+            
+            if current != "":
+            
+                values.append(current)
+            
+            # The values correspond to various fields; the first is the
+            # MIME type/subtype; the second is the RISC OS name; the third
+            # is the hexadecimal value used for the filetype; the rest
+            # are the extensions to recognise:
+            if len(values) > 3:
+            
+                mappings.append(
+                    { "MIME": values[0], "RISC OS name": values[1],
+                      "Hex": values[2], "Extensions": values[3:] }
+                    )
+        
+        # Return the mappings.
+        return mappings
+    
+    def suffix_to_filetype(self, filename):
+    
+        # Find the appropriate filetype to use for the filename given.
+        at = string.rfind(filename, os.extsep)
+        
+        if at == -1:
+        
+            # No suffix: return the default filetype.
+            return default_filetype
+        
+        # The suffix includes the "." character. Remove this platform's
+        # separator and replace it with a ".".
+        suffix = "." + filename[at+len(os.extsep):]
+        
+        # Find the suffix in the list of mappings.
+        for mapping in self.mimemap:
+        
+            if suffix in mapping["Extensions"]:
+            
+                # Return the corresponding filetype for this suffix.
+                try:
+                
+                    return string.atoi(mapping["Hex"], 16)
+                   
+                except ValueError:
+                
+                    # The value found was not in a valid hexadecimal
+                    # representation. Return the default filetype.
+                    return default_filetype
+        
+        # No mappings declared the suffix used.
+        return default_filetype
 
 
 
-class Access(Common):
+class Unused(Common):
+
+    def _read_port(self, port):
+    
+        if not self.ports.has_key(port):
+        
+            print "No socket to use for port %i" % port
+            return []
+        
+        s = self.ports[port]
+        
+        try:
+        
+            data, address = s.recvfrom(1024)
+            
+            lines = ["From: %s:%i" % address]
+            lines = lines + self.interpret(data)
+        
+        except socket.error:
+        
+            lines = []
+        
+        return lines
+    
+    def read_port(self, ports = [32770, 32771, 49171]):
+    
+        t0 = time.time()
+        
+        log = []
+        
+        try:
+        
+            while 1:
+            
+                t = int(time.time() - t0)
+                
+                for port in ports:
+                
+                    lines = self._read_port(port)
+                    
+                    if lines != []:
+                    
+                        for line in lines:
+                        
+                            print line
+                            log.append(line)
+                        
+                        print
+                        log.append("")
+        
+        except KeyboardInterrupt:
+        
+            pass
+        
+        return log
+
+
+
+class Peer(Common):
 
     def __init__(self):
     
+        # ---------------------------------------------------------------------
+        # Read configuration files
+        
+        # Read the MimeMap file. This method is defined in the Common class
+        # definition.
+        self.mimemap = self.read_mimemap()
+        
         # ---------------------------------------------------------------------
         # Socket configuration
         
@@ -431,60 +603,6 @@ class Access(Common):
         self._share_l.bind((self.hostaddr, 49171))
         
         self.ports[49171] = self._share_l
-    
-    def _read_port(self, port):
-    
-        if not self.ports.has_key(port):
-        
-            print "No socket to use for port %i" % port
-            return []
-        
-        s = self.ports[port]
-        
-        try:
-        
-            data, address = s.recvfrom(1024)
-            
-            lines = ["From: %s:%i" % address]
-            lines = lines + self.interpret(data)
-        
-        except socket.error:
-        
-            lines = []
-        
-        return lines
-    
-    def read_port(self, ports = [32770, 32771, 49171]):
-    
-        t0 = time.time()
-        
-        log = []
-        
-        try:
-        
-            while 1:
-            
-                t = int(time.time() - t0)
-                
-                for port in ports:
-                
-                    lines = self._read_port(port)
-                    
-                    if lines != []:
-                    
-                        for line in lines:
-                        
-                            print line
-                            log.append(line)
-                        
-                        print
-                        log.append("")
-        
-        except KeyboardInterrupt:
-        
-            pass
-        
-        return log
     
     def _send_list(self, l, s, to_addr):
     
@@ -1241,9 +1359,38 @@ class Access(Common):
 
                 dir_length = 0
                 
+                # Count the number of files to be sent. More than 77 files
+                # may cause problems. We will use os.stat to check for
+                # objects which are not files or directories.
+                
                 n_files = 0
                 
+                new_files = []
+                
                 for file in files:
+                
+                    if string.find(file, os.extsep) != -1:
+                    
+                        continue
+                    
+                    try:
+                    
+                        os.stat(os.path.join(direct, file))
+                        n_files = n_files + 1
+                        new_files.append(file)
+                    
+                    except OSError:
+                    
+                        pass
+                    
+                    # If 77 files have been listed then list no more.
+                    if n_files == 77: break
+                
+                print "%i files found."
+                
+                n_files = 0
+                
+                for file in new_files:
                 
                     file_msg = []
                     length = 0
@@ -1259,7 +1406,10 @@ class Access(Common):
                         
                         else:
                         
-                            file_msg.append(0xffffff4b)
+                            # Use the suffix of the file to generate a
+                            # filetype.
+                            filetype = self.suffix_to_filetype(file)
+                            file_msg.append(0xfff0004b | (filetype << 8))
                         
                         length = length + 4
                         
@@ -1338,65 +1488,12 @@ class Access(Common):
                 # Send the reply.
                 self._send_list(msg, _socket, address)
                 
-#                msg = \
-#                [
-#                    "S"+data[1:4], 0x0000001c, 0x00000024, 0xfffffd49,
-#                       0x00000000, 0x00000800, 0x00000010, 0x00000002,
-#                       '!Boot\x00',         "B"+data[1:4], 0xffffcd00,
-#                       0x00000000, 0x00000800, 0x00000013, 0x00000000,
-#                       0x00000000, 0x0000001c, 0xffffffff
-#                    #              Root entry?
-#                ]
-
-#                msg = \
-#                [
-#                    "S"+data[1:4], 0x00000164, 0x00000024, 0xfffffd49,
-#                       0x3edb7498, 0x00000800, 0x00000010, 0x00000002,
-#                    #  Unknown (0)
-#                       '!Boot\x00',            0xfffffd49, 0x3edbc788,
-#                       0x00000800, 0x00000010, 0x00000002, 'Apps\x00',
-#                       0xfffffd49, 0x3edc21cf, 0x00000800,
-#                    #              Unknown (0)
-#                       0x00000010, 0x00000002, 'Diversions\x00',
-#                                   0xfffffd49, 0x3ee2c0fa, 0x00000800,
-#                    #                          Unknown (0)
-#                       0x00000010, 0x00000002, 'home\x00',
-#                       0xfffffd49, 0x3ee2c386, 0x00000800, 0x00000010,
-#                    #              Unknown (0)
-#                       0x00000002, 'LaTeX\x00',            0xfffffd49,
-#                       0x3edc6049, 0x00000800, 0x00000010, 0x00000002,
-#                    #  Unknown (0)
-#                       'Manuals\x00',          0xfffffd49, 0x3edfa359,
-#                    #                                      Unknown (0)
-#                       0x00000800, 0x00000010, 0x00000002, 'Personal\x00',
-#                                               0xfffff54b, 0x00000000,
-#                    #                                      Unknown (0)
-#                       0x000099cc, 0x00000003, 0x00000001, 'Printout\x00',
-#                                               0xffffff4b, 0xc9836700,
-#                    #                                      Unknown (0)
-#                       0x000099cc, 0x00000009, 0x00000001, 'Printout3\x00',
-#                                               0xfffffd49, 0x3edcb9cd,
-#                    #                                      Unknown (0)
-#                       0x00000800, 0x00000010, 0x00000002, 'Public\x00',
-#                                   0xfffffd49, 0x3edd06c9, 0x00000800,
-#                    #                          Unknown (0)
-#                       0x00000010, 0x00000002, 'Utilities\x00',
-#                                   0xfffffd49, 0x3edefe4c, 0x00000800,
-#                       0x00000010, 0x00000002, 'Work\x00',
-#                    "B"+data[1:4], 0xffffcd00, 0x00000000, 0x00000800,
-#                       0x00000013, 0x00000002, 0x00000000, 0x00000164,
-#                    #              Unknown (0) Unknown (0)
-#                       0xffffffff
-#                ]
-                
                 print
                 print "Sent:"
                 for line in self.interpret(self._encode(msg)):
                 
                     print line
                 print
-                
-#                self._send_list(msg, _socket, address)
             
             except (KeyError, OSError):
             
