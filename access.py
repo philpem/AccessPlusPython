@@ -36,8 +36,8 @@ DIR_EXEC = os.path.stat.S_IFDIR | \
 FILE_ATTR = os.path.stat.S_IFREG
 
 # Protected share read and write masks
-PROTECTED_READ  = 0044
-PROTECTED_WRITE = 0022
+PROTECTED_READ  = 0004
+PROTECTED_WRITE = 0002
 
 # Unprotected share read and write masks
 UNPROTECTED_READ  = 0444
@@ -483,6 +483,12 @@ class Ports(Common):
     def _expect_reply(self, _socket, msg, host, new_id, commands,
                       tries = 5, delay = 2):
     
+        # Add an entry to the Messages object so that replies to this message
+        # can be collected rather than being discarded. This requires that
+        # the derived class has an attribute called "share_messages" which
+        # refers to a Messages instance.
+        self.share_messages.add_entry(new_id)
+        
         replied = 0
         
         # Keep a record of the time of the previous request.
@@ -491,12 +497,16 @@ class Ports(Common):
         while tries > 0:
         
             # See if the response has arrived.
-            replied, data = self.share_messages._scan_messages(commands, new_id)
+            replied, data = self.share_messages._scan_messages(new_id, commands)
             
             # If a message was found or an error occurred then return
             # immediately.
             if replied != 0:
             
+                # Remove the entry in the Messages object for replies to this
+                # message.
+                self.share_messages.remove_entry(new_id)
+                
                 return replied, data
             
             t1 = time.time()
@@ -508,6 +518,10 @@ class Ports(Common):
                 
                 t0 = t1
                 tries = tries - 1
+        
+        # Remove the entry in the Messages object for replies to this
+        # message.
+        self.share_messages.remove_entry(new_id)
         
         # Return a negative result.
         return 0, (0, "The machine containing the shared disc does not respond")
@@ -684,7 +698,7 @@ class Messages(Common):
 
     def __init__(self):
     
-        self.messages = []
+        self.messages = {}
     
     def __getitem__(self, item):
     
@@ -756,22 +770,44 @@ class Messages(Common):
     
     def append(self, value):
     
-        self.messages.append(value)
+        # Take the first word of the message and store the message under
+        # that entry in the dictionary if it exists.
+        key = value[1:4]
+        
+        if key != "" and self.messages.has_key(key):
+        
+            self.messages[key].append(value)
     
     def remove(self, value):
     
-        self.messages.remove(value)
+        # Take the first word of the message and remove the message from
+        # that entry in the dictionary if it exists.
+        key = value[1:4]
+        
+        if key != "" and self.messages.has_key(key):
+        
+            self.messages[key].remove(value)
     
-    def _scan_messages(self, commands, new_id):
+    def add_entry(self, new_id):
     
-        for data in self.messages:
+        # Add a dictionary entry for expected messages with this ID.
+        self.messages[new_id] = []
+    
+    def remove_entry(self, new_id):
+    
+        # Remove dictionary entries for messages which are no longer valid.
+        del self.messages[new_id]
+    
+    def _scan_messages(self, new_id, commands):
+    
+        for data in self.messages[new_id]:
         
             for command in commands:
             
                 if data[:4] == command + new_id:
                 
                     # Remove the claimed message from the list.
-                    self.messages.remove(data)
+                    self.messages[new_id].remove(data)
                     
                     #self.data = data
                     
@@ -781,25 +817,33 @@ class Messages(Common):
             if data[:4] == "E"+new_id:
             
                 #print 'Error: "%s"' % data[8:]
-                self.messages.remove(data)
+                self.messages[new_id].remove(data)
                 
                 return -1, (self.str2num(4, data[4:8]), data[8:])
         
         # Return a negative result.
         return 0, (0, "The machine containing the shared disc does not respond")
     
-    def _all_messages(self, commands, new_id):
+    def _all_messages(self, new_id, commands):
     
+        try:
+        
+            reply_messages = self.messages[new_id]
+        
+        except KeyError:
+        
+            reply_messages = []
+        
         messages = []
         
-        for data in self.messages:
+        for data in reply_messages:
         
             for command in commands:
             
                 if data[:4] == command + new_id:
                 
                     # Remove the claimed message from the list.
-                    self.messages.remove(data)
+                    self.messages[new_id].remove(data)
                     
                     # Add it to the list of messages found.
                     messages.append(data)
@@ -1995,7 +2039,10 @@ class Share(Ports, Translate):
             
                 # Ensure that the remote client doesn't mess up the file
                 # access attributes by making the file unreadable.
-                mode = ( (mode & 0x1c7) | ((mode & 0x1c0) >> 3) )
+                mode = (
+                    (mode & 0x1c0) | ((mode & 0x1c0) >> 3) | \
+                    ((mode & 0x1c0) >> 6)
+                    )
                 
                 mode = (mode & self.mode) | FILE_ATTR
                 
@@ -2970,7 +3017,7 @@ class RemoteShare(Ports, Translate):
                 sys.stdout.flush()
             
             # Remove all relevant messages from the message list.
-            messages = self.messages._all_messages(["w", "R"], reply_id)
+            messages = self.messages._all_messages(reply_id, ["w", "R"])
             
             print "Discarded messages."
             for msg in messages:
@@ -3224,7 +3271,7 @@ class RemoteShare(Ports, Translate):
                 start_addr = next_addr
             
             # Remove all relevant messages from the message list.
-            messages = self.messages._all_messages(["w", "R"], reply_id)
+            messages = self.messages._all_messages(reply_id, ["w", "R"])
             
             print "Discarded messages."
             for msg in messages:
@@ -3958,7 +4005,7 @@ class Peer(Ports):
             pass
         
         # Remove all relevant messages from the message list.
-        messages = self.share_messages._all_messages(["d"], reply_id)
+        messages = self.share_messages._all_messages(reply_id, ["d"])
         
         #self.log("comment", "Discarded messages:", "")
         #for msg in messages:
@@ -4064,7 +4111,7 @@ class Peer(Ports):
             self._send_list(msg, _socket, address)
         
         # Remove all relevant messages from the message list.
-        messages = self.share_messages._all_messages(["r"], reply_id)
+        messages = self.share_messages._all_messages(reply_id, ["r"])
         
         self.log("comment", "Discarded messages:", "")
         for msg in messages:
@@ -5141,7 +5188,7 @@ class Peer(Ports):
             
             length = min(length, SEND_SIZE)
             
-            print "Data request", hex(handle), pos, length
+            #print "Data request", hex(handle), pos, length
             
             try:
             
