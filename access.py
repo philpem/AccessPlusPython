@@ -2240,13 +2240,13 @@ class Peer(Common):
         
         data = ["B"+new_id, 0xb, handle, 0, info["length"]]
         
-        return
-        
         print "Sent:"
         for line in self.interpret(self._encode(data)):
         
             print line
         print
+        
+        return
         
         # Send the request.
         self._send_list(data, s, (host, 49171))
