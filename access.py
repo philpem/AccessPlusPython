@@ -11,6 +11,7 @@ DEFAULT_FILETYPE = 0xffd
 DEFAULT_SUFFIX = os.extsep + "txt"
 #DEFAULT_SUFFIX = ""
 DEFAULT_SHARE_DELAY = 30.0
+DEFAULT_PRINTER_DELAY = 30.0
 TIDY_DELAY = 60.0
 
 # Find the number of centiseconds between 1900 and 1970.
@@ -487,7 +488,7 @@ class Ports(Common):
         # can be collected rather than being discarded. This requires that
         # the derived class has an attribute called "share_messages" which
         # refers to a Messages instance.
-        self.share_messages.add_entry(new_id)
+        self.share_messages.add_entry(host, new_id)
         
         replied = 0
         
@@ -497,7 +498,8 @@ class Ports(Common):
         while tries > 0:
         
             # See if the response has arrived.
-            replied, data = self.share_messages._scan_messages(new_id, commands)
+            replied, data = \
+                self.share_messages._scan_messages(host, new_id, commands)
             
             # If a message was found or an error occurred then return
             # immediately.
@@ -505,7 +507,7 @@ class Ports(Common):
             
                 # Remove the entry in the Messages object for replies to this
                 # message.
-                self.share_messages.remove_entry(new_id)
+                self.share_messages.remove_entry(host, new_id)
                 
                 return replied, data
             
@@ -521,7 +523,7 @@ class Ports(Common):
         
         # Remove the entry in the Messages object for replies to this
         # message.
-        self.share_messages.remove_entry(new_id)
+        self.share_messages.remove_entry(host, new_id)
         
         # Return a negative result.
         return 0, (0, "The machine containing the shared disc does not respond")
@@ -768,46 +770,46 @@ class Messages(Common):
     
         return self.messages.values()
     
-    def append(self, value):
+    def append(self, (host, data)):
     
         # Take the first word of the message and store the message under
         # that entry in the dictionary if it exists.
-        key = value[1:4]
+        key = data[1:4]
         
-        if key != "" and self.messages.has_key(key):
+        if key != "" and self.messages.has_key((host, key)):
         
-            self.messages[key].append(value)
+            self.messages[(host, key)].append(data)
     
-    def remove(self, value):
+    def remove(self, (host, data)):
     
         # Take the first word of the message and remove the message from
         # that entry in the dictionary if it exists.
-        key = value[1:4]
+        key = data[1:4]
         
-        if key != "" and self.messages.has_key(key):
+        if key != "" and self.messages.has_key((host, key)):
         
-            self.messages[key].remove(value)
+            self.messages[(host, key)].remove(data)
     
-    def add_entry(self, new_id):
+    def add_entry(self, host, new_id):
     
         # Add a dictionary entry for expected messages with this ID.
-        self.messages[new_id] = []
+        self.messages[(host, new_id)] = []
     
-    def remove_entry(self, new_id):
+    def remove_entry(self, host, new_id):
     
         # Remove dictionary entries for messages which are no longer valid.
-        del self.messages[new_id]
+        del self.messages[(host, new_id)]
     
-    def _scan_messages(self, new_id, commands):
+    def _scan_messages(self, host, new_id, commands):
     
-        for data in self.messages[new_id]:
+        for data in self.messages[(host, new_id)]:
         
             for command in commands:
             
                 if data[:4] == command + new_id:
                 
                     # Remove the claimed message from the list.
-                    self.messages[new_id].remove(data)
+                    self.messages[(host, new_id)].remove(data)
                     
                     #self.data = data
                     
@@ -817,18 +819,18 @@ class Messages(Common):
             if data[:4] == "E"+new_id:
             
                 #print 'Error: "%s"' % data[8:]
-                self.messages[new_id].remove(data)
+                self.messages[(host, new_id)].remove(data)
                 
                 return -1, (self.str2num(4, data[4:8]), data[8:])
         
         # Return a negative result.
         return 0, (0, "The machine containing the shared disc does not respond")
     
-    def _all_messages(self, new_id, commands):
+    def _all_messages(self, host, new_id, commands):
     
         try:
         
-            reply_messages = self.messages[new_id]
+            reply_messages = self.messages[(host, new_id)]
         
         except KeyError:
         
@@ -843,7 +845,7 @@ class Messages(Common):
                 if data[:4] == command + new_id:
                 
                     # Remove the claimed message from the list.
-                    self.messages[new_id].remove(data)
+                    self.messages[(host, new_id)].remove(data)
                     
                     # Add it to the list of messages found.
                     messages.append(data)
@@ -1604,41 +1606,38 @@ class Share(Ports, Translate):
             self.read_mask = UNPROTECTED_READ
             self.write_mask = UNPROTECTED_WRITE
         
-        # Create an event to use to inform the share that it must be
-        # removed.
-        event = threading.Event()
-        
-        self.event = event
-        
-        # Create a thread to run the share broadcast loop.
-        thread = threading.Thread(
-            group = None, target = self.broadcast_share,
-            name = 'Share "%s"' % name, args = (name, event),
-            kwargs = {"protected": self.protected, "delay": delay}
-            )
-        
         # Determine the current time to use for the date of creation.
         date = time.localtime(time.time())
         
         # Record the relevant information about the share.
         
         self.name = name
-        self.thread = thread
         self.directory = directory
         self.date = date
         self.mode = mode
         self.present = present
         self.filetype = filetype
+        self.delay = delay
         
         # Convert the share's mode mask to a file attribute mask.
         self.access_attr = self.to_riscos_access(mode = mode)
         
+        # Create an event to use to inform the share that it must be
+        # removed.
+        self.event = threading.Event()
+        
+        # Create a thread to run the share broadcast loop.
+        self.thread = threading.Thread(
+            group = None, target = self.broadcast_share,
+            name = 'Share "%s"' % self.name
+            )
+        
         # Start the thread.
-        thread.start()
+        self.thread.start()
     
-    def broadcast_share(self, name, event, protected = 0, delay = 30):
+    def broadcast_share(self):
     
-        """broadcast_share(self, name, event, protected = 0, delay = 30)
+        """broadcast_share(self)
         
         Broadcast the availability of a share every few seconds.
         """
@@ -1654,8 +1653,8 @@ class Share(Ports, Translate):
         
         data = \
         [
-            0x00010002, 0x00010000, 0x00010000 | len(name),
-            name + chr(protected & 1)
+            0x00010002, 0x00010000, 0x00010000 | len(self.name),
+            self.name + chr(self.protected & 1)
         ]
         
         self._send_list(data, s, (Broadcast_addr, 32770))
@@ -1686,8 +1685,8 @@ class Share(Ports, Translate):
         
         data = \
         [
-            0x00010004, 0x00010000, 0x00010000 | len(name),
-            name + chr(protected & 1)
+            0x00010004, 0x00010000, 0x00010000 | len(self.name),
+            self.name + chr(self.protected & 1)
         ]
         
         while 1:
@@ -1696,9 +1695,9 @@ class Share(Ports, Translate):
             
             t0 = time.time()
             
-            while (time.time() - t0) < delay:
+            while (time.time() - t0) < self.delay:
             
-                if event.isSet(): return
+                if self.event.isSet(): return
         
         # Broadcast that the share has now been removed.
         
@@ -1706,8 +1705,8 @@ class Share(Ports, Translate):
         
         data = \
         [
-            0x00010003, 0x00010000, 0x00010000 | len(name),
-            name + chr(protected & 1)
+            0x00010003, 0x00010000, 0x00010000 | len(self.name),
+            self.name + chr(self.protected & 1)
         ]
     
     #def notify_share_users(self, 
@@ -2187,14 +2186,14 @@ class Share(Ports, Translate):
         # Convert the RISC OS style path to a path within the share.
         path = self.from_riscos_path(ros_path)
         
+        if path is None:
+        
+            return None, "Not found", path
+        
         if not os.path.isdir(path):
         
             # The path given did not refer to a directory.
             return None, "Not a directory", path
-        
-        if path is None:
-        
-            return None, "Not found", path
         
         # Find whether the directory structure can be legitimately descended.
         path, rest = self.descend_path(path, check_mode = self.read_mask)
@@ -2470,7 +2469,9 @@ class RemoteShare(Ports, Translate):
         Translate.__init__(self)
         
         self.name = name
-        self.host = host
+        
+        # Determine the IP address of the host.
+        self.host = socket.gethostbyname(host)
         
         # Keep a reference to the messages object passed by the Peer.
         self.share_messages = messages
@@ -3448,6 +3449,91 @@ class RemoteShare(Ports, Translate):
 
 
 
+class Printer(Ports):
+
+    def __init__(self, name, description, delay):
+    
+        # Call the initialisation method of the base classes.
+        Ports.__init__(self)
+        
+        self.name = name
+        self.description = description
+        self.delay = delay
+        
+        # Create an event to use to inform the share that it must be
+        # removed.
+        self.event = threading.Event()
+        
+        # Create a thread to run the printer broadcast loop.
+        self.thread = threading.Thread(
+            group = None, target = self.broadcast_printer,
+            name = 'Printer "%s"' % self.name
+            )
+        
+        # Start the thread.
+        self.thread.start()
+    
+    def broadcast_printer(self):
+    
+        """broadcast_printer(self)
+        
+        Broadcast the availability of a printer every few seconds.
+        """
+        
+        # Broadcast the availability of the printer on the polling socket.
+        
+        if not self.broadcasters.has_key(32770):
+        
+            print "No socket to use for port %i" % 32770
+            return
+        
+        s = self.broadcasters[32770]
+        
+        data = \
+        [
+            0x00020002, 0x00010000,
+            (len(self.description) << 16) | len(self.name),
+            self.name + self.description
+        ]
+        
+        self._send_list(data, s, (Broadcast_addr, 32770))
+        
+        # Advertise the share on the share socket.
+        
+        if not self.broadcasters.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return
+        
+        s = self.broadcasters[49171]
+        
+        # Create a string to send.
+        data = [0x00000046, 0x00000013, 0x00000000]
+        
+        while 1:
+        
+            self._send_list(data, s, (Broadcast_addr, 49171))
+            
+            t0 = time.time()
+            
+            while (time.time() - t0) < self.delay:
+            
+                if self.event.isSet(): return
+        
+        # Broadcast that the share has now been removed.
+        
+        s = self.broadcasters[32770]
+        
+        data = \
+        [
+            0x00010003, 0x00010000, 0x00010000 | len(self.name),
+            self.name + chr(self.protected & 1)
+        ]
+    
+
+
+
+
 class Peer(Ports):
 
     def __init__(self, debug = 1):
@@ -3749,65 +3835,6 @@ class Peer(Ports):
         
         self._send_list(data, s, (Broadcast_addr, 32770))
     
-    def broadcast_printer(self, name, description, event,
-                          protected = 0, delay = 30):
-    
-        """broadcast_share(self, name, description, event,
-                           protected = 0, delay = 30)
-        
-        Broadcast the availability of a printer every few seconds.
-        """
-        
-        # Broadcast the availability of the printer on the polling socket.
-        
-        if not self.broadcasters.has_key(32770):
-        
-            print "No socket to use for port %i" % 32770
-            return
-        
-        s = self.broadcasters[32770]
-        
-        data = \
-        [
-            0x00020002, 0x00010000,
-            (len(description) << 16) | len(name),
-            name + description
-        ]
-        
-        self._send_list(data, s, (Broadcast_addr, 32770))
-        
-        # Advertise the share on the share socket.
-        
-        if not self.broadcasters.has_key(49171):
-        
-            print "No socket to use for port %i" % 49171
-            return
-        
-        s = self.broadcasters[49171]
-        
-        # Create a string to send.
-        data = [0x00000046, 0x00000013, 0x00000000]
-        
-        while 1:
-        
-            self._send_list(data, s, (Broadcast_addr, 49171))
-            
-            t0 = time.time()
-            
-            while (time.time() - t0) < delay:
-            
-                if event.isSet(): return
-        
-        # Broadcast that the share has now been removed.
-        
-        s = self.broadcasters[32770]
-        
-        data = \
-        [
-            0x00010003, 0x00010000, 0x00010000 | len(name),
-            name + chr(protected & 1)
-        ]
-    
     def broadcast_directory_share(self, name, event, protected = 0, delay = 30):
     
         """broadcast_share(self, name, event, protected = 0, delay = 30)
@@ -4012,7 +4039,7 @@ class Peer(Ports):
             pass
         
         # Remove all relevant messages from the message list.
-        #messages = self.share_messages._all_messages(reply_id, ["d"])
+        #messages = self.share_messages._all_messages(address[0], reply_id, ["d"])
         
         #self.log("comment", "Discarded messages:", "")
         #for msg in messages:
@@ -4307,7 +4334,12 @@ class Peer(Ports):
         
             # A remote printer
             
-            if minor == 0x0002:
+            if minor == 0x0001:
+            
+                # !Printers has started on a remote machine.
+                pass
+            
+            elif minor == 0x0002:
             
                 # Printer made available
                 
@@ -4320,15 +4352,15 @@ class Peer(Ports):
                 
                 c = c + length2
                 
-                print 'Printer "%s" (%s) available' % \
-                    (printer_name, printer_desc)
+                #print 'Printer "%s" (%s) available' % \
+                #    (printer_name, printer_desc)
                 
                 # Compare the printer with those recorded.
                 
-                if not self.printer.has_key((name, host)):
+                if not self.printers.has_key((printer_name, host)):
                 
                     # Add the printer name and host to the printers dictionary.
-                    self.printers[(name, host)] = (None, None)
+                    self.printers[(printer_name, host)] = (None, None)
             
             elif minor == 0x0003:
             
@@ -4343,16 +4375,16 @@ class Peer(Ports):
                 
                 c = c + length2
                 
-                print 'Printer "%s" (%s) withdrawn' % \
-                    (printer_name, printer_desc)
+                #print 'Printer "%s" (%s) withdrawn' % \
+                #    (printer_name, printer_desc)
                 
                 # Compare the printer with those recorded.
                 
-                if self.printers.has_key((name, host)):
+                if self.printers.has_key((printer_name, host)):
                 
                     # Remove the printer name and host from the printers
                     # dictionary.
-                    del self.printers[(name, host)]
+                    del self.printers[(printer_name, host)]
             
             elif minor == 0x0004:
             
@@ -4367,8 +4399,15 @@ class Peer(Ports):
                 
                 c = c + length2
                 
-                print 'Printer "%s" (%s)' % \
-                    (printer_name, printer_desc)
+                #print 'Printer "%s" (%s)' % \
+                #    (printer_name, printer_desc)
+                
+                # Compare the printer with those recorded.
+                
+                if not self.printers.has_key((printer_name, host)):
+                
+                    # Add the printer name and host to the printers dictionary.
+                    self.printers[(printer_name, host)] = (None, None)
             
             else:
             
@@ -5240,22 +5279,22 @@ class Peer(Ports):
         elif command == "D":
         
             # Request for data to be sent.
-            self.share_messages.append(data)
+            self.share_messages.append((host, data))
         
         elif command == "R":
         
             # Reply from a successful open request.
-            self.share_messages.append(data)
+            self.share_messages.append((host, data))
         
         elif command == "S":
         
             # Successful request for a catalogue.
-            self.share_messages.append(data)
+            self.share_messages.append((host, data))
         
         elif command == "E":
         
             # Error response to a request.
-            self.share_messages.append(data)
+            self.share_messages.append((host, data))
             
             print "%s (%i)" % (
                 self.read_string(data[8:], ending = "\000", include = 0),
@@ -5270,17 +5309,17 @@ class Peer(Ports):
         elif command == "d":
         
             # Data sent to this client for uploading.
-            self.share_messages.append(data)
+            self.share_messages.append((host, data))
         
         elif command == "r":
         
             # Data sent to this client for uploading.
-            self.share_messages.append(data)
+            self.share_messages.append((host, data))
         
         elif command == "w":
         
             # Request for data to be sent to a remote client for uploading.
-            self.share_messages.append(data)
+            self.share_messages.append((host, data))
         
         else:
         
@@ -5376,6 +5415,23 @@ class Peer(Ports):
                 self.shares[(name, host)].event.set()
                 
                 thread = self.shares[(name, host)].thread
+                
+                # Wait until the thread terminates.
+                while thread.isAlive():
+                
+                    pass
+        
+        # Threads for printer broadcasts
+        
+        for (name, host), printer in self.printers.items():
+        
+            # Only terminate threads for shares on this host.
+            if host == Hostaddr:
+            
+                print "Terminating thread for printer: %s" % name
+                self.printers[(name, host)].event.set()
+                
+                thread = self.printers[(name, host)].thread
                 
                 # Wait until the thread terminates.
                 while thread.isAlive():
@@ -5535,9 +5591,10 @@ class Peer(Ports):
         # Remove the thread and the event from their respective dictionaries.
         del self.shares[(name, Hostaddr)]
     
-    def add_printer(self, name):
+    def add_printer(self, name, description = "", delay = DEFAULT_PRINTER_DELAY):
     
-        """add_printer(self, name)
+        """add_printer(self, name, description = "",
+                       delay = DEFAULT_PRINTER_DELAY)
         
         Make the named printer available to other hosts.
         """
@@ -5547,23 +5604,9 @@ class Peer(Ports):
             print "Printer is already available: %s" % name
             return
         
-        # Create an event to use to inform the share that it must be
-        # removed.
-        event = threading.Event()
+        printer = Printer(name, description, delay)
         
-        self.printer_events[name] = event
-        
-        # Create a thread to run the share broadcast loop.
-        thread = threading.Thread(
-            group = None, target = self.broadcast_printer,
-            name = 'Printer "%s"' % name, args = (name, event),
-            kwargs = {"protected": protected, "delay": delay}
-            )
-        
-        self.printers[(name, Hostaddr)] = thread
-        
-        # Start the thread.
-        thread.start()
+        self.printers[(name, Hostaddr)] = printer
     
     def remove_printer(self, name):
     
