@@ -470,7 +470,7 @@ class Ports(Common):
         while tries > 0:
         
             # See if the response has arrived.
-            replied, data = self.messages._scan_messages(commands, new_id)
+            replied, data = self.share_messages._scan_messages(commands, new_id)
             
             # If a message was found or an error occurred then return
             # immediately.
@@ -2002,7 +2002,7 @@ class RemoteShare(Ports, Translate):
         self.host = host
         
         # Keep a reference to the messages object passed by the Peer.
-        self.messages = messages
+        self.share_messages = messages
     
     def _read_file_info(self, data):
     
@@ -3345,7 +3345,7 @@ class Peer(Ports):
                 
                 if replied == -1:
                 
-                    return
+                    raise IOError
                 
                 elif replied == 1:
                 
@@ -3406,24 +3406,24 @@ class Peer(Ports):
                     
                     else:
                     
-                        return
+                        raise IOError
                 
                 # Check the event flag.
                 if event.isSet():
                 
                     fh.close()
                     break
+            
+            # Send a reply message to indicate that the transfer has finished.
+            msg = ["R"+reply_id, start, pos]
+            self._send_list(msg, _socket, address)
         
         except IOError:
         
-            return
-        
-        # Send a reply message to indicate that the transfer has finished.
-        msg = ["R"+reply_id, start, pos]
-        self._send_list(msg, _socket, address)
+            pass
         
         # Remove all relevant messages from the message list.
-        messages = self.messages._all_messages(["d"], reply_id)
+        messages = self.share_messages._all_messages(["d"], reply_id)
         
         self.log("comment", "Discarded messages:", "")
         for msg in messages:
@@ -3434,18 +3434,18 @@ class Peer(Ports):
             
             self.log("comment", "", "")
     
-    def send_file(self, event, reply_id, start, length, fh, _socket,
-                  address):
+    def send_file(self, event, reply_id, code, handle, start, length, fh,
+                  _socket, address):
     
         # This method should only get called once by the thread it belongs
         # to, then the thread should terminate.
         
         pos = start
         
-        end = start + length
-        
         # Determine the amount of information we can send.
         amount = min(length, SEND_GET_SIZE)
+        
+        end = start + length
         
         self.log("comment", "Position: %i" % pos, "")
         self.log("comment", "Expected amount of data: %i" % amount, "")
@@ -3454,74 +3454,91 @@ class Peer(Ports):
         # Read the host name from the address tuple.
         host = address[0]
         
-        # Determine the length of the file.
-        file_length = fh.length()
+        try:
         
-        while pos < end:
+            while 1:
+            
+                # Find the relevant part of the file.
+                fh.seek(pos, 0)
+                
+                # Read the amount of data required.
+                file_data = fh.read(amount)
+                
+                # Calculate the new offset into the file.
+                new_pos = pos + len(file_data)
+                
+                # Send the data prefixed by its offset relative to the
+                # start address within the file supplied.
+                msg = self._encode(["D"+reply_id, pos - start]) + file_data
+                
+                self.log(
+                    "comment",
+                    "Sent %i bytes of data (from %x) to %s" % (
+                        len(file_data), pos - start, host
+                        ), ""
+                    )
+                
+                self.ports[49171].sendto(msg, (host, 49171))
+                
+                # Send a message with the new offset within the block
+                # requested.
+                msg = ["D", new_pos]
+                
+                # Send the reply.
+                replied, data = self._send_request(
+                    msg, host, ["r"], new_id = reply_id
+                    )
+                
+                if replied == -1:
+                
+                    return
+                
+                elif replied == 1:
+                
+                    # Read the header.
+                    pos = start + self.str2num(4, data[4:8])
+                    amount = min(end - pos, SEND_GET_SIZE)
+                    
+                    if pos >= end:
+                    
+                        break
+                
+                else:
+                
+                    # No response. Check the position within the data
+                    # received.
+                    if pos >= end:
+                    
+                        break
+                    
+                    else:
+                    
+                        raise IOError
         
-            # Find the relevant part of the file.
-            fh.seek(pos, 0)
+            # Send an message indicating that all the data has been sent.
+            # We use the code and handle sent to us by the remote client.
+            msg = ["R"+reply_id, end - start, end - start]
             
-            # Read the amount of data required.
-            file_data = fh.read(amount)
-            
-            # Calculate the new offset into the file.
-            new_pos = pos + len(file_data)
-            
-            msg = self._encode(["D"+reply_id, pos]) + file_data
-            
-            # Send the request.
-            replied, data = self._send_request(
-                msg, host, ["r"], new_id = reply_id
-                )
-            
-            if replied == -1:
-            
-                return
-            
-            elif replied == 1:
-            
-                # Read the header.
-                pass
-            
-            
-        if 0:
+            self._send_list(msg, self.ports[49171], (host, 49171))
         
-            # If the amount of data requested by the client cannot be sent
-            # then send a "D" ... message indicating the amount of data
-            # being supplied.
-            
-            header = self._encode([pos])
-            
-            trailer = None
-        
-        # Construct the information string.
-        info = header + file_data
-        
-        return info, trailer, new_pos
-        if info is not None and pos == length:
-        
-            msg = self._encode(["S"+reply_id]) + info + \
-                self._encode("B"+reply_id) + trailer
-            
-            # Send the message.
-            _socket.sendto(msg, address)
-        
-        elif info is not None and pos < length:
-        
-            # Less data than the remote client requested was
-            # read from the file.
-            msg = self._encode(["D"+reply_id]) + info
-            
-            # Send the message.
-            _socket.sendto(msg, address)
-        
-        else:
+        except IOError:
         
             msg = ["E"+reply_id, 0x100d6, "Not found"]
             
             # Send a reply.
             self._send_list(msg, _socket, address)
+        
+        # Remove all relevant messages from the message list.
+        messages = self.share_messages._all_messages(["r"], reply_id)
+        
+        self.log("comment", "Discarded messages:", "")
+        for msg in messages:
+        
+            for line in self.interpret(msg):
+            
+                self.log("comment", line, "")
+            
+            self.log("comment", "", "")
     
     def read_poll_socket(self):
     
@@ -4242,7 +4259,7 @@ class Peer(Ports):
                             path, address[0], address[1]
                             ),
                         args = (
-                            event, reply_id, pos, length, fh,
+                            event, reply_id, code, handle, pos, length, fh,
                             _socket, address
                             )
                         )
