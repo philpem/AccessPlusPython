@@ -335,7 +335,7 @@ class Common:
         if at == -1:
         
             # No suffix: return the default filetype.
-            return default_filetype
+            return default_filetype, self.riscos_filename(filename)
         
         # The suffix includes the "." character. Remove this platform's
         # separator and replace it with a ".".
@@ -349,16 +349,18 @@ class Common:
                 # Return the corresponding filetype for this suffix.
                 try:
                 
-                    return string.atoi(mapping["Hex"], 16)
+                    return string.atoi(mapping["Hex"], 16), \
+                        self.riscos_filename(filename[:at])
                    
                 except ValueError:
                 
                     # The value found was not in a valid hexadecimal
                     # representation. Return the default filetype.
-                    return default_filetype
+                    return default_filetype, \
+                        self.riscos_filename(filename[:at])
         
         # No mappings declared the suffix used.
-        return default_filetype
+        return default_filetype, self.riscos_filename(filename[:at])
 
 
 
@@ -1384,9 +1386,9 @@ class Peer(Common):
                         pass
                     
                     # If 77 files have been listed then list no more.
-                    if n_files == 77: break
+                    #if n_files == 77: break
                 
-                print "%i files found."
+                #print "%i files found." % n_files
                 
                 n_files = 0
                 
@@ -1400,6 +1402,8 @@ class Peer(Common):
                     try:
                     
                         # Filetype word
+                        filetype, filename = self.suffix_to_filetype(file)
+                        
                         if os.path.isdir(path):
                         
                             file_msg.append(0xfffffd49)
@@ -1408,7 +1412,6 @@ class Peer(Common):
                         
                             # Use the suffix of the file to generate a
                             # filetype.
-                            filetype = self.suffix_to_filetype(file)
                             file_msg.append(0xfff0004b | (filetype << 8))
                         
                         length = length + 4
@@ -1452,10 +1455,10 @@ class Peer(Common):
                         
                         # Convert the name into a form suitable for the
                         # other client.
-                        file_name = self.riscos_filename(file)
+                        #file_name = self.riscos_filename(file)
                         
                         # Zero terminated name string
-                        name_string = self._encode([file_name + "\000"])
+                        name_string = self._encode([filename + "\x00"])
                         
                         file_msg.append(name_string)
                         
