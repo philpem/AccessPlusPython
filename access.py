@@ -18,6 +18,13 @@ RECV_SIZE = 32768
 SEND_SIZE = 32768
 
 
+
+class ConfigError(Exception):
+
+    pass
+
+
+
 class Common:
 
     def str2num(self, size, s):
@@ -111,6 +118,17 @@ class Common:
                 offset = offset + 1
     
             return new
+    
+    def coerce(self, fn, args, exceptions, error_msg):
+    
+        try:
+        
+            return fn(*args)
+        
+        except exceptions:
+        
+            sys.stderr.write(error_msg)
+            raise ConfigError, "Failed to coerce %s using %s." % (args, fn)
     
     def new_id(self):
     
@@ -268,7 +286,7 @@ class Common:
     
         return self._filename(name, self.from_riscos)
     
-    def read_mimemap(self):
+    def create_mimemap(self):
     
         # Compile a list of paths to check for the MimeMap file.
         paths = [""]
@@ -306,7 +324,7 @@ class Common:
         # Read the lines found.    
         for line in lines:
         
-            # Strip trailing whitespace and split the string.
+            # Strip leading and trailing whitespace and split the string.
             s = string.strip(line)
             
             values = []
@@ -341,8 +359,134 @@ class Common:
                       "Hex": values[2], "Extensions": values[3:] }
                     )
         
-        # Return the mappings.
-        return mappings
+        # Store the mappings.
+        self.mimemap = mappings
+    
+    def create_shares(self):
+    
+        # Compile a list of paths to check for the access.cfg file.
+        paths = [""]
+        
+        # Look for a file in the path used to invoke this program.
+        path, file = os.path.split(sys.argv[0])
+        paths.append(path)
+        
+        f = None
+        
+        for path in paths:
+        
+            try:
+            
+                f = open(os.path.join(path, "access.cfg"), "r")
+                break
+            
+            except IOError:
+            
+                # Loop again.
+                pass
+        
+        if f is None:
+        
+            print "Failed to find access.cfg file."
+            lines = []
+        
+        else:
+        
+            lines = f.readlines()
+            f.close()
+        
+        # Read the lines found.
+        for line in lines:
+        
+            # Strip leading and trailing whitespace.
+            s = string.strip(line)
+            
+            values = []
+            current = ""
+            
+            # Ignore lines beginning with a "#" character.
+            if s[:1] == "#": continue
+            
+            for c in s:
+            
+                if c not in string.whitespace:
+                
+                    current = current + c
+                
+                elif current != "":
+                
+                    values.append(current)
+                    current = ""
+            
+            if current != "":
+            
+                values.append(current)
+            
+            # The values correspond to various fields corresponding to the
+            # following syntax:
+            #
+            # <share> <path> <mode> <delay> <translation> <filetype>
+            #
+            # The "share" parameter is the name by which other clients
+            # refer to the contents of the shared directory.
+            #
+            # The "path" is the path on the local filesystem which can be
+            # navigated by other clients.
+            #
+            # The "mode" is an octal value describing a mask to apply to
+            # the files and directories in the shared directory. This
+            # is loosely translated into a value for the protected flag
+            # which is understood by RISC OS clients.
+            #
+            # The "delay" parameter sets the delay between availability
+            # broadcasts on the network. This can be disabled by supplying
+            # the value "off" (without quotes) or set to the default value
+            # using the value "default".
+            #
+            # The "translation" parameter is either "suffix" or "truncate"
+            # indicating that filename suffixes are either to be presented
+            # to other clients or truncated.
+            #
+            # A final parameter is the default filetype to be used for
+            # files whose type cannot be determined using the MimeMap
+            # file. This should take the form of a twelve bit integer in
+            # Python or C hexadecimal form, e.g. 0xfff.
+            #
+            # myshare /home/user/myfile 0644 off truncate 0xffd
+            
+            if len(values) == 6:
+            
+                # Try to create this share.
+                name, path, mode, delay, present, filetype = values[0:6]
+                
+                try:
+                
+                    mode = self.coerce(
+                        string.atoi, (mode, 8), (ValueError,),
+                        "Invalid octal value for mode mask: %s" % mode
+                        )
+                    
+                    delay = self.coerce(
+                        float, (delay,), (ValueError,),
+                        "Invalid delay value: %s" % delay
+                        )
+                    
+                    filetype = self.coerce(
+                        string.atoi, (filetype, 16), (ValueError,),
+                        "Invalid hexadecimal value for filetype: %s" % filetype
+                        )
+                    
+                    self.add_share(name, path, mode, delay)
+                
+                except ConfigError:
+                
+                    pass
+            
+            elif len(values) > 0:
+            
+                sys.stderr.write(
+                    "Bad or incomplete share description: %s" % line
+                    )
     
     def suffix_to_filetype(self, filename):
     
@@ -759,9 +903,9 @@ class File:
         
             # Not done yet. Write the pieces first then read back the
             # result.
-            pass
+            self.close()
         
-        else:
+        if self.pieces == []:
         
             # If there are pieces in the object then read the data from
             # the underlying file.
@@ -914,13 +1058,6 @@ class Peer(Common):
     
         self.debug = 1
         # ---------------------------------------------------------------------
-        # Read configuration files
-        
-        # Read the MimeMap file. This method is defined in the Common class
-        # definition.
-        self.mimemap = self.read_mimemap()
-        
-        # ---------------------------------------------------------------------
         # Socket configuration
         
         # Define a global hostname variable to represent this machine on the local
@@ -1013,8 +1150,18 @@ class Peer(Common):
         self.max_handles = 100
         self.handles = {}
         
+        # ---------------------------------------------------------------------
+        # Read configuration files
+        
+        # Read the MimeMap file. This method is defined in the Common class
+        # definition.
+        self.create_mimemap()
+        
         # Start serving.
         self.serve()
+        
+        # Read the share configuration file, creating shares as required.
+        self.create_shares()
     
     def __del__(self):
     
@@ -2795,9 +2942,9 @@ class Peer(Common):
                 # Reset the timer and prune the list of transfers.
                 t0 = time.time()
                 
-                items in self.transfers.items()
+                items = self.transfers.items()
                 
-                if path, thread in items:
+                for path, (thread, host) in items:
                 
                     if not thread.isAlive():
                     
