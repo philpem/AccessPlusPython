@@ -1763,16 +1763,6 @@ class Peer(Common):
         
             # Data request ("B") / data resend ("A")
             
-            print "From: %s:%i" % address
-            
-            lines = self.interpret(data)
-            
-            for line in lines:
-            
-                print line
-            
-            print
-            
             handle = self.str2num(4, data[8:12])
             pos = self.str2num(4, data[12:16])
             length = self.str2num(4, data[16:20])
@@ -1828,12 +1818,6 @@ class Peer(Common):
                 #    print line
                 #print
                 msg = self._encode(["E"+data[1:4], 0x100d6, "Not found"])
-            
-            print "Sent:"
-            for line in self.interpret(msg):
-            
-                print line
-            print
             
             # Send the message.
             _socket.sendto(msg, address)
