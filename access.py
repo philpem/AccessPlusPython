@@ -1369,7 +1369,7 @@ class Peer(Common):
                 
                 for file in files:
                 
-                    if string.find(file, os.extsep) != -1:
+                    if string.find(file, os.extsep) == 0:
                     
                         continue
                     
