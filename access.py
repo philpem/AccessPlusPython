@@ -25,7 +25,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
 
-__version__ = "0.27"
+__version__ = "0.28"
 
 import glob, os, string, socket, sys, threading, time, types
 
@@ -356,10 +356,10 @@ class Common:
     def take_riscos_filetype_date(self, filetype_word, date_word):
     
         # Extract the filetype and date.
-        filetype = (filetype_word & 0xfff00) >> 8
+        filetype = long((filetype_word & 0xfff00) >> 8)
         
-        date_str = hex(filetype_word)[-2:] + hex(date_word)[2:]
-        date = self.from_riscos_time(long(date_str, 16))
+        date_num = ((filetype_word & 0xff) << 32) | long(date_word)
+        date = self.from_riscos_time(date_num)
         
         return filetype, date
     
@@ -2628,10 +2628,10 @@ class RemoteShare(Ports, Translate):
         # Read the information on the object.
         filetype_word = self.str2num(4, data[4:8])
         filetype = (filetype_word & 0xfff00) >> 8
-        date_str = hex(self.str2num(4, data[4:8]))[-2:] + \
-                hex(self.str2num(4, data[8:12]))[2:]
+        date_num = ((self.str2num(4, data[4:8]) & 0xff) << 32) | \
+                   (self.str2num(4, data[8:12]))
         
-        date = self.from_riscos_time(long(date_str, 16))
+        date = self.from_riscos_time(date_num)
         
         length = self.str2num(4, data[12:16])
         access_attr = self.str2num(4, data[16:20])
@@ -2722,14 +2722,14 @@ class RemoteShare(Ports, Translate):
         
             # Filetype word
             filetype_word = self.str2num(4, data[c:c+4])
-            filetype = (filetype_word & 0xfff00) >> 8
+            filetype = long((filetype_word & 0xfff00) >> 8)
             c = c + 4
             
             # Unknown word
-            date_str = hex(filetype_word)[-2:] + \
-                hex(self.str2num(4, data[c:c+4]))[2:]
+            date_num = ((filetype_word & 0xff) << 32) | \
+                        self.str2num(4, data[c:c+4])
             
-            date = self.from_riscos_time(long(date_str, 16))
+            date = self.from_riscos_time(date_num)
             
             c = c + 4
             
@@ -4363,8 +4363,8 @@ class Peer(Ports):
                 
                 self.log(
                     "comment",
-                    "Sent %i bytes of data (from %x) to %s" % (
-                        len(file_data), pos - start, host
+                    "Sent %i bytes of data (from %x beyond %x) to %s" % (
+                        len(file_data), pos - start, start, host
                         ), ""
                     )
                 
@@ -4372,7 +4372,7 @@ class Peer(Ports):
                 
                 # Send a message with the new offset within the block
                 # requested.
-                msg = ["D", new_pos]
+                msg = ["D", new_pos - start] # - start is experimental
                 
                 # Send the reply.
                 replied, data = self._send_request(
@@ -4387,7 +4387,8 @@ class Peer(Ports):
                 
                     # Read the header.
                     pos = start + self.str2num(4, data[4:8])
-                    amount = min(end - pos, SEND_PGET_SIZE)
+                    end_pos = start + self.str2num(4, data[8:12])
+                    amount = min(end - pos, max(SEND_PGET_SIZE, end_pos - pos))
                     
                     if pos >= end:
                     
@@ -4407,7 +4408,7 @@ class Peer(Ports):
         
             # Send an message indicating that all the data has been sent.
             # We use the code and handle sent to us by the remote client.
-            msg = ["R"+reply_id, end - start, end - start]
+            msg = ["R"+reply_id, end - start, end]
             
             self._send_list(msg, self.ports[49171], (host, 49171))
         
