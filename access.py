@@ -1600,9 +1600,15 @@ class Peer(Common):
                             
                                 # Create an object on the local filesystem.
                                 open(path, "wb").write("")
+                                os.chmod(path, 0666)
                             
                             except IOError:
                             
+                                path = ""
+                            
+                            except OSError:
+                            
+                                os.remove(path)
                                 path = ""
                         
                         else:
@@ -1619,9 +1625,15 @@ class Peer(Common):
                         
                             # Create an object on the local filesystem.
                             open(path, "wb").write("")
+                            os.chmod(path, 0666)
                         
                         except IOError:
                         
+                            path = ""
+                        
+                        except OSError:
+                        
+                            os.remove(path)
                             path = ""
                     
                     # Try to find the details of the object.
@@ -1661,11 +1673,6 @@ class Peer(Common):
                         # date words.
                         filetype, date = self.make_riscos_filetype_date(path)
                         
-                        if code == 0x4:
-                        
-                            filetype = 0xdeaddead
-                            date = 0xdeaddead
-                        
                         # Find the length of the file.
                         length = os.path.getsize(path)
                         
@@ -1681,6 +1688,12 @@ class Peer(Common):
                         
                         # Keep this handle for possible later use.
                         self.handles[handle] = (path, length)
+                        
+                        if code == 0x4:
+                        
+                            filetype = 0xdeaddead
+                            date = 0xdeaddead
+                            access_attr = 0x33
                         
                         msg = [ "R"+data[1:4], filetype, date, length,
                                 access_attr, object_type, handle ]
@@ -1727,12 +1740,14 @@ class Peer(Common):
         
         elif command == "A" and code == 0xf:
         
-            # Dismount?
+            # Confirm beginning of file transfer to this machine.
             
             self.log("received", data, address)
             
-            # Reply with an error message.
-            msg = ["E"+data[1:4], 0x163ac, "Shared disc not available."]
+            # If we can accept the file then respond with a terse reply.
+            msg = ["R"+data[1:4], 0]
+            
+            self.log("sent", self._encode(msg), address)
             
             self._send_list(msg, _socket, address)
         
@@ -2282,7 +2297,7 @@ class Peer(Common):
         del self.printers[(name, self.hostaddr)]
         del self.printer_events[name]
     
-    def expect_reply(self, _socket, data, host, new_id, commands,
+    def _expect_reply(self, _socket, data, host, new_id, commands,
                      tries = 5, delay = 1):
     
         replied = 0
@@ -2327,6 +2342,42 @@ class Peer(Common):
         # Return a negative result.
         return 0, (0, "The machine containing the shared disc does not respond")
     
+    def _send_request(self, msg, host, commands):
+    
+        """replied, data = _send_reqest(self, msg)
+        
+        Send a message via the non-broadcast share port to a remote client
+        and wait for a reply.
+        """
+        # Use the non-broadcast socket.
+        if not self.ports.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return 0, []
+        
+        s = self.ports[49171]
+        
+        # Use a new ID for this message.
+        new_id = self.new_id()
+        
+        # Create the command to send. The three bytes following the
+        # command character are used to identify the response from the
+        # other client (it passes them back in its response).
+        msg[0] = msg[0] + new_id
+        
+        # Send a request.
+        self.log("sent", self._encode(msg), (host, 49171))
+        
+        # Send the request.
+        self._send_list(msg, s, (host, 49171))
+        
+        # Wait for a reply.
+        replied, data = self._expect_reply(s, msg, host, new_id, commands)
+        
+        self.log("received", data, (host, 49171))
+        
+        return replied, data
+    
     def _read_file_info(self, data):
     
         # Read the information on the object.
@@ -2355,26 +2406,10 @@ class Peer(Common):
         Open a share of a given name on the host specified.
         """
         
-        # Use the non-broadcast socket.
-        if not self.ports.has_key(49171):
-        
-            print "No socket to use for port %i" % 49171
-            return None
-        
-        s = self.ports[49171]
-        
-        # Create a string to send. The three bytes following the "A"
-        # character are used to identify the response from the other
-        # client (it passes them back).
-        new_id = self.new_id()
-        
-        data = ["A"+new_id, 1, 0, name+"\x00"]
+        msg = ["A", 1, 0, name+"\x00"]
         
         # Send the request.
-        self._send_list(data, s, (host, 49171))
-        
-        # Wait for a reply.
-        replied, data = self.expect_reply(s, data, host, new_id, ["R"])
+        replied, data = self._send_request(msg, host, ["R"])
         
         if replied == 0:
         
@@ -2395,27 +2430,10 @@ class Peer(Common):
         given.
         """
         
-        # Use the non-broadcast socket.
-        if not self.ports.has_key(49171):
-        
-            print "No socket to use for port %i" % 49171
-            return
-        
-        s = self.ports[49171]
-        
-        # Create a string to send. The three bytes following the "B"
-        # character are used to identify the response from the other
-        # client (it passes them back). We retrieve them from a
-        # dictionary.
-        new_id = self.new_id()
-        
-        data = ["B"+new_id, 3, 0xffffffff, 0, name+"\x00"]
+        msg = ["B", 3, 0xffffffff, 0, name+"\x00"]
         
         # Send the request.
-        self._send_list(data, s, (host, 49171))
-        
-        # Wait for a reply.
-        replied, data = self.expect_reply(s, data, host, new_id, ["S"])
+        replied, data = self._send_request(msg, host, ["S"])
         
         if replied == 0:
         
@@ -2509,15 +2527,8 @@ class Peer(Common):
         
             return
         
-        # Use the non-broadcast socket (we have established that it exists).
-        s = self.ports[49171]
-        
-        # Create a string to send. The three bytes following the "B"
-        # character are used to identify the response from the other
-        # client (it passes them back). We retrieve them from a
-        # dictionary.
-        new_id = self.new_id()
-        
+        # Use the file handle obtained from the information retrieved about
+        # this object.
         handle = info["handle"]
         
         file_data = []
@@ -2528,24 +2539,15 @@ class Peer(Common):
         
         while pos < info["length"]:
         
-            data = ["B"+new_id, 0xb, handle, pos, 0x800]
+            msg = ["B", 0xb, handle, pos, 0x800]
             
             # Send the request.
-            self._send_list(data, s, (host, 49171))
-            
-            # Wait for a reply.
-            replied, data = self.expect_reply(s, data, host, new_id, ["S"])
+            replied, data = self._send_request(msg, host, ["S"])
             
             if replied == 0:
             
                 print "The machine containing the shared disc does not respond"
                 return
-            
-            #print "Received:"
-            #for line in self.interpret(data):
-            #
-            #    print line
-            #print
             
             # Read the header.
             length = self.str2num(4, data[4:8])
@@ -2571,12 +2573,8 @@ class Peer(Common):
         
         
         # Ensure that the whole file has been read.
-        new_id = self.new_id()
-        data = ["B"+new_id, 0xb, handle, info["length"], 0]
-        self._send_list(data, s, (host, 49171))
-        
-        # Wait for a reply.
-        replied, data = self.expect_reply(s, data, host, new_id, ["S"])
+        msg = ["B", 0xb, handle, info["length"], 0]
+        replied, data = self._send_request(msg, host, ["S"])
         
         if replied == 0:
         
@@ -2601,12 +2599,8 @@ class Peer(Common):
                 sys.stdout.flush()
         
         # Close the resource.
-        new_id = self.new_id()
-        data = ["A"+new_id, 0xa, handle]
-        self._send_list(data, s, (host, 49171))
-        
-        # Wait for a reply.
-        replied, data = self.expect_reply(s, data, host, new_id, ["R"])
+        msg = ["A", 0xa, handle]
+        replied, data = self._send_request(msg, host, ["R"])
         
         if replied == 0:
         
@@ -2614,19 +2608,34 @@ class Peer(Common):
         
         return string.join(file_data, "")
     
+    def _close(self, handle, host):
+    
+        # Use the file handle obtained from the information retrieved about
+        # this object to close the resource.
+        msg = ["A", 0xa, handle]
+        replied, data = self._send_request(msg, host, ["R"])
+        
+        if replied == 0:
+        
+            return None
+    
     def put(self, path, name, host):
     
-        # Use the non-broadcast socket.
-        if not self.ports.has_key(49171):
-        
-            print "No socket to use for port %i" % 49171
-            return
-        
-        s = self.ports[49171]
-        
         try:
         
+            # Determine the file's relevant filetype and
+            # date words.
+            filetype, date = self.make_riscos_filetype_date(path)
+            
+            # Find the length of the file.
             length = os.path.getsize(path)
+            
+            # Construct access attributes for the other client.
+            mode = os.stat(path)[os.path.stat.ST_MODE]
+            access_attr = self.to_riscos_access(mode)
+            
+            # Use a default value for the object type.
+            object_type = 0x0101
         
         except OSError:
         
@@ -2647,18 +2656,11 @@ class Peer(Common):
         
         print ros_path
         
-        # Create a string to send indicating that a file is to be uploaded.
-        new_id = self.new_id()
-        
-        msg = ["A"+new_id, 0x4, 0, ros_path+"\x00"]
-        
-        self.log("sent", self._encode(msg), (host, 49171))
+        # Create a message to send indicating that a file is to be uploaded.
+        msg = ["A", 0x4, 0, ros_path+"\x00"]
         
         # Send the request.
-        self._send_list(msg, s, (host, 49171))
-        
-        # Wait for a reply.
-        replied, data = self.expect_reply(s, msg, host, new_id, ["R"])
+        replied, data = self._send_request(msg, host, ["R"])
         
         if replied == 0:
         
@@ -2668,26 +2670,60 @@ class Peer(Common):
         # created remote file.
         info = self._read_file_info(data)
         
-        self.log("received", data, (host, 49171))
-        
         # Send a follow up request.
-        new_id = self.new_id()
-        
-        msg = ["A"+new_id, 0xc, 0, info["handle"], 0, 0x00010000]
-        
-        self.log("sent", self._encode(msg), (host, 49171))
+        msg = ["A", 0xf, info["handle"], 0]
         
         # Send the request.
-        self._send_list(msg, s, (host, 49171))
-        
-        # Wait for a reply.
-        replied, data = self.expect_reply(s, msg, host, new_id, ["R"])
+        replied, data = self._send_request(msg, host, ["R"])
         
         if replied == 0:
         
             return
         
-        self.log("received", data, (host, 49171))
+        # Send the new name.
+        msg = ["A", 0x7, 0x3, 0, ros_path + "\x00"]
+        
+        # Send the request.
+        replied, data = self._send_request(msg, host, ["R"])
+        
+        if replied == 0:
+        
+            return
+        
+        # Send the new filetype and data.
+        msg = ["A", 0x10, 0, info["handle"], filetype, date]
+        
+        # Send the request.
+        replied, data = self._send_request(msg, host, ["R"])
+        
+        if replied == 0:
+        
+            return
+        
+        # Send the new length of the file.
+        msg = ["A", 0xc, info["handle"], 0, length]
+        
+        # Send the request.
+        replied, data = self._send_request(msg, host, ["R"])
+        
+        if replied == 0:
+        
+            return
         
         return data
-
+    
+    def delete(self, name, host):
+    
+        """delete(self, name, host)
+        
+        Delete the named file on the specified host.
+        """
+        
+        msg = ["A", 0x6, 0, name + "\x00"]
+        
+        replied, data = self._send_request(msg, host, ["R"])
+        
+        if replied != 0:
+        
+            sys.stdout.write("Deleted %s on %s" % (name, host))
+            sys.stdout.flush()
