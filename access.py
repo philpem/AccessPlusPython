@@ -1243,7 +1243,7 @@ class Translate:
     
         return self._filename(name, self.from_riscos)
     
-    def suffix_to_filetype(self, filename, present = "truncate"):
+    def suffix_to_filetype(self, filename):
     
         # Find the appropriate filetype to use for the filename given.
         at = string.rfind(filename, os.extsep)
@@ -1265,7 +1265,7 @@ class Translate:
                 # Return the corresponding filetype for this suffix.
                 try:
                 
-                    if present == "truncate":
+                    if self.present == "truncate":
                     
                         # Remove the suffix before presenting it to RISC OS.
                         return string.atoi(mapping["Hex"], 16), \
@@ -1294,7 +1294,7 @@ class Translate:
             return DEFAULT_FILETYPE, self.to_riscos_filename(filename)
         
         # A hexadecimal suffix was used.
-        if present == "truncate":
+        if self.present == "truncate":
         
             # Remove the suffix before presenting it to RISC OS.
             return value, self.to_riscos_filename(filename)[:at]
@@ -1303,13 +1303,13 @@ class Translate:
         
             return value, self.to_riscos_filename(filename)
     
-    def filetype_to_suffix(self, filename, filetype, present = "truncate"):
+    def filetype_to_suffix(self, filename, filetype):
     
         # Find the appropriate filetype to use for the filename given.
         #at = string.rfind(filename, "/")
         #
-        #if at != -1 and present == "suffix":
-        if present == "suffix":
+        #if at != -1 and self.present == "suffix":
+        if self.present == "suffix":
         
             # The suffix includes the "/" character. Replace it with this
             # platform's separator and ignore the filetype.
@@ -2247,7 +2247,7 @@ class Share(Ports, Translate):
             
                 # Filetype word
                 filetype, filename = \
-                    self.suffix_to_filetype(file, present = self.present)
+                    self.suffix_to_filetype(file)
                 
                 # Construct the filetype and date words.
                 
@@ -2474,6 +2474,10 @@ class RemoteShare(Ports, Translate):
         
         # Keep a reference to the messages object passed by the Peer.
         self.share_messages = messages
+        
+        # Use truncation when sending and receiving files from this
+        # share as a client.
+        self.present = "truncate"
     
     def _read_file_info(self, data):
     
@@ -2492,7 +2496,7 @@ class RemoteShare(Ports, Translate):
         info = { "filetype": filetype, "date": date,
                  "length": length,
                  "access": access_attr, "type": object_type,
-                 "isdir": (object_type == 0x2) }
+                 "isdir": ((object_type & 0x2) != 0) }
         
         if len(data) > 24:
         
@@ -2874,29 +2878,41 @@ class RemoteShare(Ports, Translate):
         
         self.log("comment", "File to put: %s" % file, "")
         
-        filetype, ros_file = \
-            self.suffix_to_filetype(file, present = self.present)
+        filetype, ros_file = self.suffix_to_filetype(file)
         
         self.log("comment", "Remote file: %s" % ros_file, "")
         
         # Determine whether the share path supplied refers to a file
         # or a directory.
         
-        info = self.catalogue(ros_path)
+        info = self.open(ros_path)
         
         if info is not None:
         
-            # A directory
+            self._close(info["handle"])
             
-            # Prefix the path in the share with the share name and append
-            # the filename to obtain a full share path to the object.
-            ros_path = ros_path + "." + ros_file
+            if info["isdir"]:
             
-            full_path = self.name + "." + ros_path
+                # A directory
+                
+                # Prefix the path in the share with the share name and append
+                # the filename to obtain a full share path to the object.
+                ros_path = ros_path + "." + ros_file
+                
+                full_path = self.name + "." + ros_path
+            
+            else:
+            
+                # A file
+                
+                # Use the share path given and ignore the filename derived
+                # from the local path.
+                
+                full_path = self.name + "." + ros_path
         
         else:
         
-            # A file or no existing object
+            # No existing object
             
             # Use the share path given and ignore the filename derived
             # from the local path.
@@ -3017,17 +3033,6 @@ class RemoteShare(Ports, Translate):
                     )
                 sys.stdout.flush()
             
-            # Remove all relevant messages from the message list.
-            messages = self.messages._all_messages(reply_id, ["w", "R"])
-            
-            print "Discarded messages."
-            for msg in messages:
-            
-                for line in self.interpret(msg):
-                
-                    print line
-                print
-            
             # When all the data has been sent, send an empty "d" message.
             msg = ["d"+reply_id, length]
             
@@ -3107,34 +3112,46 @@ class RemoteShare(Ports, Translate):
         self.log("comment", "File to put: %s" % file, "")
         
         filetype, ros_file = \
-            self.suffix_to_filetype(file, present = self.present)
+            self.suffix_to_filetype(file)
         
         self.log("comment", "Remote file: %s" % ros_file, "")
         
         # Determine whether the share path supplied refers to a file
         # or a directory.
         
-        info = self.catalogue(ros_path)
+        info = self.open(ros_path)
         
         if info is not None:
         
-            # A directory
+            self._close(info["handle"])
             
-            # Prefix the path in the share with the share name and append
-            # the filename to obtain a full share path to the object.
-            ros_path = ros_path + "." + ros_file
+            if info["isdir"]:
             
-            full_path = self.name + "." + ros_path
+                # A directory
+                
+                # Prefix the path in the share with the share name and append
+                # the filename to obtain a full share path to the object.
+                ros_path = ros_path + "." + ros_file
+                
+                full_path = self.name + "." + ros_path
+            
+            else:
+            
+                # A file
+                
+                # Use the share path given and ignore the filename derived
+                # from the local path.
+                
+                full_path = self.name + "." + ros_path
         
         else:
         
-            # A file or no existing object
+            # No existing object
             
             # Use the share path given and ignore the filename derived
             # from the local path.
             
             full_path = self.name + "." + ros_path
-        
         
         self.log("comment", "Remote path: %s" % ros_path, "")
         
@@ -3270,17 +3287,6 @@ class RemoteShare(Ports, Translate):
                 
                 # Increase the start position.
                 start_addr = next_addr
-            
-            # Remove all relevant messages from the message list.
-            messages = self.messages._all_messages(reply_id, ["w", "R"])
-            
-            print "Discarded messages."
-            for msg in messages:
-            
-                for line in self.interpret(msg):
-                
-                    print line
-                print
             
             # When all the data has been sent, send an empty "d" message.
             msg = ["d"+reply_id, length]
@@ -4006,7 +4012,7 @@ class Peer(Ports):
             pass
         
         # Remove all relevant messages from the message list.
-        messages = self.share_messages._all_messages(reply_id, ["d"])
+        #messages = self.share_messages._all_messages(reply_id, ["d"])
         
         #self.log("comment", "Discarded messages:", "")
         #for msg in messages:
@@ -4111,18 +4117,6 @@ class Peer(Ports):
             # Send a reply.
             self._send_list(msg, _socket, address)
         
-        # Remove all relevant messages from the message list.
-        messages = self.share_messages._all_messages(reply_id, ["r"])
-        
-        self.log("comment", "Discarded messages:", "")
-        for msg in messages:
-        
-            for line in self.interpret(msg):
-            
-                self.log("comment", line, "")
-            
-            self.log("comment", "", "")
-    
     def rename_path(self, event, reply_id, pos, amount, buf,
                     _socket, address):
     
@@ -5605,7 +5599,13 @@ class Peer(Ports):
         
             pass
         
-        share = RemoteShare(name, host, self.share_messages)
+        try:
+        
+            share = self.shares[(name, host)]
+        
+        except KeyError:
+        
+            share = RemoteShare(name, host, self.share_messages)
         
         info = share.open("")
         
