@@ -482,23 +482,33 @@ class Common:
         if direction[0] == "s":
         
             self._log.append("Sent to %s:%i" % address)
+            self._log = self._log + self.interpret(self._encode(data))
+        
+        elif direction[0] == "r":
+        
+            self._log.append("Received from %s:%i" % address)
+            self._log = self._log + self.interpret(data)
         
         else:
         
-            self._log.append("Received from %s:%i" % address)
-        
-        self._log = self._log + self.interpret(data)
+            self._log.append(data)
         
         self._log.append("")
     
-    def to_riscos_access(self, mode):
+    def to_riscos_access(self, mode = 0777, path = None):
     
-        """word = to_riscos_access(self, mode)
+        """word = to_riscos_access(self, mode = 0777, path = None)
         
         Return a word representing the RISC OS access flags roughly
         equivalent to the read, write and execute flags for a local file,
         given as an octal number in integer form.
+        
+        If a path is given then its mode is determined and used instead.
         """
+        
+        if path is not None:
+        
+            mode = os.stat(path)[os.path.stat.ST_MODE]
         
         # Owner permissions
         owner_read = (mode & os.path.stat.S_IRUSR) != 0
@@ -578,6 +588,71 @@ class Common:
         others = ot_r + ot_w + ot_e
         
         return owner + group + others
+    
+    def to_riscos_objtype(self, path):
+    
+        if not os.path.exists(path):
+        
+            return 0
+        
+        elif os.path.isfile(path):
+        
+            return 0x0101
+        
+        elif os.path.isdir(path):
+        
+            return 0x2
+        
+        else:
+        
+            return 0
+    
+    def from_riscos_path(self, _string):
+    
+        path = self.read_string(
+            _string, ending = "\x00", include = 0
+            )
+        
+        # Split the path up into elements.
+        path_elements = string.split(path, ".")
+        
+        # The first element is the share name.
+        share_name = path_elements[0]
+        
+        # Read the directory name associated with this share.
+        thread, directory = self.shares[(share_name, self.hostaddr)]
+        
+        # Construct a path to the object below the shared
+        # directory.
+        path = self.from_riscos_filename(
+            string.join(path_elements[1:], ".")
+            )
+        
+        # Append this path to the shared directory's path.
+        path = os.path.join(directory, path)
+        
+        return path
+    
+    def read_path_info(self, path):
+    
+        # Determine the file's relevant filetype and
+        # date words.
+        filetype, date = self.make_riscos_filetype_date(path)
+        
+        # Find the length of the file.
+        length = os.path.getsize(path)
+        
+        # Construct access attributes for the other client.
+        access_attr = self.to_riscos_access(path = path)
+        
+        # Use a default value for the object type.
+        object_type = self.to_riscos_objtype(path = path)
+        
+        # Use the inode of the file as its handle.
+        handle = os.stat(path)[os.path.stat.ST_INO]# & 0xffffff7f
+        
+        return filetype, date, length, access_attr, object_type, handle
+    
 
 
 
@@ -1536,6 +1611,8 @@ class Peer(Common):
         
             code = None
         
+        self.log("received", data, address)
+        
         if command == "A" and (code == 0x1 or code == 0x2 or code == 0x4):
         
             # Attempt to open a share, directory or path.
@@ -1549,7 +1626,13 @@ class Peer(Common):
             # The first element is the share name.
             share_name = path_elements[0]
             
-            print 'Request to open "%s" using %s' % (share_name, path_elements[1:])
+            self.log(
+                "comment",
+                'Request to open "%s" using %s' % (
+                    share_name, path_elements[1:]
+                    ),
+                ""
+                )
             
             if self.shares.has_key((share_name, self.hostaddr)):
             
@@ -1594,7 +1677,6 @@ class Peer(Common):
                         if code == 0x4:
                         
                             # File is being sent.
-                            self.log("received", data, address)
                             
                             try:
                             
@@ -1619,7 +1701,6 @@ class Peer(Common):
                     elif code == 0x4:
                     
                         # File is being sent but one already exists.
-                        self.log("received", data, address)
                         
                         try:
                         
@@ -1651,8 +1732,7 @@ class Peer(Common):
                         length = 0x800
                         
                         # Construct access attributes for the other client.
-                        mode = os.stat(path)[os.path.stat.ST_MODE]
-                        access_attr = self.to_riscos_access(mode)
+                        access_attr = self.to_riscos_access(path = path)
                         
                         # Use a default value for the object type.
                         object_type = 0x2
@@ -1669,22 +1749,9 @@ class Peer(Common):
                     elif path != "" and os.path.isfile(path):
                     
                         # A file
-                        # Determine the file's relevant filetype and
-                        # date words.
-                        filetype, date = self.make_riscos_filetype_date(path)
                         
-                        # Find the length of the file.
-                        length = os.path.getsize(path)
-                        
-                        # Construct access attributes for the other client.
-                        mode = os.stat(path)[os.path.stat.ST_MODE]
-                        access_attr = self.to_riscos_access(mode)
-                        
-                        # Use a default value for the object type.
-                        object_type = 0x0101
-                        
-                        # Use the inode of the file as its handle.
-                        handle = os.stat(path)[os.path.stat.ST_INO]# & 0xffffff7f
+                        filetype, data, length, access_attr, object_type, \
+                            handle = self.read_path_info(path)
                         
                         # Keep this handle for possible later use.
                         self.handles[handle] = (path, length)
@@ -1708,7 +1775,7 @@ class Peer(Common):
                         # Reply with an error message.
                         msg = ["E"+data[1:4], 0x100d6, "Not found"]
                 
-                self.log("sent", self._encode(msg), address)
+                self.log("sent", msg, address)
                 
                 # Send a reply.
                 self._send_list(msg, _socket, address)
@@ -1720,6 +1787,63 @@ class Peer(Common):
                     ["E"+data[1:4], 0x163ac, "Shared disc not available."],
                     _socket, address
                     )
+        
+        elif command == "A" and code == 0x6:
+        
+            # Delete request.
+            
+            try:
+            
+                path = self.from_riscos_path(data[12:])
+                
+                # Construct access attributes for the other client.
+                access_attr = self.to_riscos_access(path = path)
+                
+                object_type = self.to_riscos_objtype(path)
+                
+                os.remove(path)
+                
+                msg = [ "R"+data[1:4], 0xdeaddead, 0xdeaddead, 0x00000000,
+                        access_attr, object_type ]
+            
+            except OSError:
+            
+                msg = ["E"+data[1:4], 0x100d6, "Not found"]
+            
+            except KeyError:
+            
+                msg = ["E"+data[1:4], 0x163ac, "Shared disc not available."]
+            
+            self.log("sent", msg, address)
+            
+            self._send_list(msg, _socket, address)
+        
+        elif command == "A" and code == 0x9:
+        
+            # Rename file on our machine.
+            
+            self.log("received", data, address)
+            
+            try:
+            
+                path = self.from_riscos_path(data[16:])
+                
+                filetype, date, length, access_attr, object_type, \
+                    handle = self.read_path_info(path)
+                
+                msg = [ "R"+data[1:4], filetype, date, length,
+                        access_attr, object_type, handle ]
+                        
+            except OSError:
+            
+                msg = ["E"+data[1:4], 0x100d6, "Not found"]
+            
+            except KeyError:
+            
+                msg = ["E"+data[1:4], 0x163ac, "Shared disc not available."]
+            
+            self.log("sent", msg, address)
+            self._send_list(msg, _socket, address)
         
         elif command == "A" and code == 0xa:
         
@@ -1747,7 +1871,7 @@ class Peer(Common):
             # If we can accept the file then respond with a terse reply.
             msg = ["R"+data[1:4], 0]
             
-            self.log("sent", self._encode(msg), address)
+            self.log("sent", msg, address)
             
             self._send_list(msg, _socket, address)
         
@@ -1869,9 +1993,7 @@ class Peer(Common):
                         length = length + 4
                         
                         # Access attributes
-                        mode = os.stat(this_path)[os.path.stat.ST_MODE]
-                        
-                        file_msg.append(self.to_riscos_access(mode))
+                        file_msg.append(self.to_riscos_access(path = this_path))
                         
                         length = length + 4
                         
@@ -2366,7 +2488,7 @@ class Peer(Common):
         msg[0] = msg[0] + new_id
         
         # Send a request.
-        self.log("sent", self._encode(msg), (host, 49171))
+        self.log("sent", msg, (host, 49171))
         
         # Send the request.
         self._send_list(msg, s, (host, 49171))
@@ -2374,7 +2496,14 @@ class Peer(Common):
         # Wait for a reply.
         replied, data = self._expect_reply(s, msg, host, new_id, commands)
         
-        self.log("received", data, (host, 49171))
+        if replied == 1:
+        
+            self.log("received", data, (host, 49171))
+        
+        else:
+        
+            # The data value is a tuple if an error occurs.
+            self.log("received", data[1], (host, 49171))
         
         return replied, data
     
@@ -2608,16 +2737,31 @@ class Peer(Common):
         
         return string.join(file_data, "")
     
-    def _close(self, handle, host):
+    def _close(self, name, host, handle = None):
     
-        # Use the file handle obtained from the information retrieved about
-        # this object to close the resource.
+        if handle is None:
+        
+            # Read the object's information.
+            info = self.info(name, host)
+            
+            if info is None:
+            
+                return
+            
+            # Use the file handle obtained from the information retrieved about
+            # this object to close the resource.
+            handle = info["handle"]
+        
         msg = ["A", 0xa, handle]
         replied, data = self._send_request(msg, host, ["R"])
         
         if replied == 0:
         
             return None
+        
+        else:
+        
+            print 'Successfully closed "%s"' % name
     
     def put(self, path, name, host):
     
@@ -2631,8 +2775,7 @@ class Peer(Common):
             length = os.path.getsize(path)
             
             # Construct access attributes for the other client.
-            mode = os.stat(path)[os.path.stat.ST_MODE]
-            access_attr = self.to_riscos_access(mode)
+            access_attr = self.to_riscos_access(path = path)
             
             # Use a default value for the object type.
             object_type = 0x0101
@@ -2727,3 +2870,19 @@ class Peer(Common):
         
             sys.stdout.write("Deleted %s on %s" % (name, host))
             sys.stdout.flush()
+    
+    def rename(self, name1, name2, host):
+    
+        msg = ["A", 0x9, 0x10, 0, name1 + "\x00"]
+        
+        replied, data = self._send_request(msg, host, ["R"])
+        
+        if replied == 0:
+        
+            return
+        
+        # The data returned represents the information about the file.
+        info = self._read_file_info(data)
+        
+        
+    
