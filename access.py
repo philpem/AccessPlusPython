@@ -1259,31 +1259,36 @@ class Peer(Common):
     
     # Method used in thread for transferring files
     
-    def transfer_file(self, event, reply_id, length, path, _socket, address):
+    def transfer_file(self, event, reply_id, pos, amount, path, length,
+                      _socket, address):
     
         # This method should only get called once by the thread it belongs
         # to, then the thread should terminate.
         
+        print "Position:", pos
+        print "Expected amount of data:", amount
+        
+        
+        end = pos + amount
+        print "End at:", end
+        
         # Read the host name from the address tuple.
         host = address[0]
         
-        # Set the size of packets we can deal with.
-        # Note that the length parameter passed is the buffer size the remote
-        # client expects. However, we request packets which are small
-        # enough for our receive buffer.
-        packet_size = min(RECV_SIZE - 8, length)
-        
-        pos = 0
-        file_ptr = 0
-        
         try:
         
-            f = open(path, "wb")
+            f = open(path, "ab")
             
             while 1:
             
+                # Set the size of packets we can deal with.
+                # Note that the length parameter passed is the buffer size the remote
+                # client expects. However, we request packets which are small
+                # enough for our receive buffer.
+                packet_size = min(RECV_SIZE - 8, end - pos)
+                
                 # Construct a list to send to the remote client.
-                msg = ["w", pos, 0, packet_size]
+                msg = ["w", pos, 0, pos + packet_size]
                 
                 self.log("comment", repr(msg), "")
                 
@@ -1292,33 +1297,48 @@ class Peer(Common):
                     msg, host, ["d"], new_id = reply_id
                     )
                 
-                if replied != 1:
+                if replied == -1:
                 
                     return
                 
-                # Read the header.
-                data_pos = self.str2num(4, data[4:8])
-                print data_pos
+                elif replied == 1:
                 
-                if len(data) > 8:
-                
-                    file_data = data[8:]
+                    # Read the header.
                     
-                    f.write(file_data)
-                    pos = data_pos + len(data) - 8
-                    file_ptr = pos
+                    data_pos = self.str2num(4, data[4:8])
+                    print "Data position", data_pos
                     
-                    print "Read %i bytes of file %s" % (file_ptr, path)
+                    if len(data) > 8:
+                    
+                        file_data = data[8:]
+                        
+                        f.seek(pos, 0)
+                        
+                        #self.log("comment", file_data, "")
+                        
+                        f.write(file_data)
+                        pos = data_pos + len(data) - 8
+                        
+                        print "Read %i bytes of file %s" % (pos, path)
+                    
+                    elif data_pos == end:
+                    
+                        # A short block was received which indicates
+                        # that all the data was read.
+                        break
                 
                 else:
                 
-                    # The file pointer for the remote file has been
-                    # updated to the new position so we can read "from
-                    # zero".
-                    file_ptr = data_pos
-                    pos = data_pos
+                    # No response. Check the position within the data
+                    # received.
+                    if pos == end:
                     
-                    print "At %i in file %s" % (file_ptr, path)
+                        break
+                    
+                    else:
+                    
+                        f.close()
+                        return
                 
                 # Check the event flag.
                 if event.isSet():
@@ -1337,6 +1357,17 @@ class Peer(Common):
         msg = ["R"+reply_id, pos, pos]
         self.log("sent", msg, address)
         self._send_list(msg, _socket, address)
+        
+        # Remove all relevant messages from the message list.
+        messages = self._all_messages(["d"], reply_id)
+        
+        print "Discarded messages."
+        for msg in messages:
+        
+            for line in self.interpret(msg):
+            
+                print line
+            print
     
     def read_poll_socket(self):
     
@@ -1615,7 +1646,7 @@ class Peer(Common):
                 # information about the client.
                 info = data[c:c+length2]
                 
-                print "Query: %s %s" % (client_name, info)
+                print "Query: %s %08x" % (client_name, self.str2num(4, info))
             
             elif minor == 0x0004:
             
@@ -2070,6 +2101,66 @@ class Peer(Common):
             
             self._send_list(msg, _socket, address)
         
+#        elif command == "A" and code == 0xb:
+#        
+#            # Set length of file.
+#            
+#            handle = self.str2num(4, data[8:12])
+#            new_length = self.str2num(4, data[12:16])
+#            
+#            print "Set length:", new_length
+#            
+#            try:
+#            
+#                # Find the path and previously recorded file length.
+#                path, length = self.handles[handle]
+#                
+#                # Find the current file length.
+#                length = os.path.getsize(path)
+#                
+#                print "Current length:", length
+#                
+#                # Write the new length for this file in this handle's entry.
+#                self.handles[handle] = (path, new_length)
+#                
+#                # If the length is to be changed then open the file for
+#                # changing.
+#                if length != new_length:
+#                
+#                    if length < new_length:
+#                    
+#                        f = open(path, "ab")
+#                        
+#                        # Extend the file length.
+#                        f.write("\x00" * (new_length - length))
+#                        
+#                        f.close()
+#                    
+#                    elif length > new_length:
+#                    
+#                        # Truncate the file.
+#                        contents = open(path, "rb").read()
+#                        
+#                        open(path, "wb").write(contents[:new_length])
+#                    
+#                msg = ["R"+reply_id, 0, new_length]
+#            
+#            except IOError:
+#            
+#                msg = ["E"+reply_id, 0x100d6, "Not found"]
+#            
+#            except KeyError:
+#            
+#                # We should probably complain about the file handle
+#                # rather than about the path.
+#                msg = ["E"+reply_id, 0x100d6, "Not found"]
+#            
+#            ## If we can accept the file then respond with a terse reply.
+#            #msg = ["D"+reply_id, 0]
+#            #self._send_list(msg, _socket, address)
+#            #
+#            self._send_list(msg, _socket, address)
+#        
         elif command == "A" and code == 0xc:
         
             # Load named file
@@ -2077,10 +2168,15 @@ class Peer(Common):
             # The remote client has passed the handle, some word
             # and the length of the file.
             handle = self.str2num(4, data[8:12])
-            new_length = self.str2num(4, data[16:20])
+            pos = self.str2num(4, data[12:16])
+            amount = self.str2num(4, data[16:20])
             
             # Translate the handle into a path.
             path, length = self.handles[handle]
+            
+            print
+            print path
+            print "Length of file:", length
             
             # Extract the host name from the address as it is assumed that
             # communication will be through port 49171.
@@ -2100,7 +2196,7 @@ class Peer(Common):
                 name = 'Transfer "%s" from %s:%i' % (
                     path, address[0], address[1]
                     ),
-                args = (event, reply_id, new_length, path, _socket, address)
+                args = (event, reply_id, pos, amount, path, length, _socket, address)
                 )
             
             # Record the thread in the transfers dictionary.
@@ -2125,15 +2221,58 @@ class Peer(Common):
         
         elif command == "A" and code == 0xf:
         
-            # Confirm beginning of file transfer to this machine.
+            # Set length of file.
             
-            self.log("received", data, address)
+            handle = self.str2num(4, data[8:12])
+            new_length = self.str2num(4, data[12:16])
             
-            # If we can accept the file then respond with a terse reply.
-            msg = ["D"+reply_id, 0]
-            self._send_list(msg, _socket, address)
+            try:
             
-            msg = ["R"+reply_id, 0x5678]
+                # Find the path and previously recorded file length.
+                path, length = self.handles[handle]
+                
+                # Find the current file length.
+                length = os.path.getsize(path)
+                
+                # Write the new length for this file in this handle's entry.
+                self.handles[handle] = (path, new_length)
+                
+                # If the length is to be changed then open the file for
+                # changing.
+                if length != new_length:
+                
+                    if length < new_length:
+                    
+                        f = open(path, "ab")
+                        
+                        # Extend the file length.
+                        f.write("\x00" * (new_length - length))
+                        
+                        f.close()
+                    
+                    elif length > new_length:
+                    
+                        # Truncate the file.
+                        contents = open(path, "rb").read()
+                        
+                        open(path, "wb").write(contents[:new_length])
+                
+                msg = ["R"+reply_id, new_length]
+            
+            except IOError:
+            
+                msg = ["E"+reply_id, 0x100d6, "Not found"]
+            
+            except KeyError:
+            
+                # We should probably complain about the file handle
+                # rather than about the path.
+                msg = ["E"+reply_id, 0x100d6, "Not found"]
+            
+            ## If we can accept the file then respond with a terse reply.
+            #msg = ["D"+reply_id, 0]
+            #self._send_list(msg, _socket, address)
+            #
             self._send_list(msg, _socket, address)
         
         elif command == "A" and code == 0x10:
@@ -2383,7 +2522,7 @@ class Peer(Common):
         
         elif (command == "A" or command == "B") and code == 0xb:
         
-            # Data request ("B") / data resend ("A")
+            # Data request ("B")
             
             handle = self.str2num(4, data[8:12])
             pos = self.str2num(4, data[12:16])
@@ -3237,7 +3376,7 @@ class Peer(Common):
             print "Cannot send file to client."
             return
         
-        # Send the new length of the file.
+        # Send the file, from the start to  its length.
         msg = ["A", 0xc, info["handle"], 0, length]
         
         # Send the request.
@@ -3338,10 +3477,10 @@ class Peer(Common):
                 print
             
             # When all the data has been sent, send an empty "d" message.
-            #msg = ["d"+reply_id, 0]
-            #self.log("sent", msg, (host, 49171))
-            #
-            #self._send_list(msg, s, (host, 49171))
+            msg = ["d"+reply_id, length]
+            self.log("sent", msg, (host, 49171))
+            
+            self._send_list(msg, s, (host, 49171))
             
             sys.stdout.write(
                 '\rFile "%s" (%i bytes) successfully written to "%s"' % (
@@ -3406,8 +3545,6 @@ class Peer(Common):
         
         # Tidy up.
         self._close(info["handle"], host)
-        
-        return info
     
     def delete(self, name, host):
     
@@ -3420,7 +3557,7 @@ class Peer(Common):
         
         replied, data = self._send_request(msg, host, ["R"])
         
-        if replied != 0:
+        if replied == 1:
         
             sys.stdout.write("Deleted %s on %s" % (name, host))
             sys.stdout.flush()
