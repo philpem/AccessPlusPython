@@ -640,7 +640,13 @@ class Common:
         filetype, date = self.make_riscos_filetype_date(path)
         
         # Find the length of the file.
-        length = os.path.getsize(path)
+        if os.path.isdir(path):
+        
+            length = 0x800
+        
+        else:
+        
+            length = os.path.getsize(path)
         
         # Construct access attributes for the other client.
         access_attr = self.to_riscos_access(path = path)
@@ -1613,6 +1619,8 @@ class Peer(Common):
         
         self.log("received", data, address)
         
+        msg = None
+        
         if command == "A" and (code == 0x1 or code == 0x2 or code == 0x4):
         
             # Attempt to open a share, directory or path.
@@ -1723,22 +1731,8 @@ class Peer(Common):
                     
                         # A directory
                         
-                        # Determine the directory's relevant filetype and
-                        # date words.
-                        filetype, date = self.make_riscos_filetype_date(path)
-                        
-                        # Don't reveal the size of directories on the local
-                        # filesystem.
-                        length = 0x800
-                        
-                        # Construct access attributes for the other client.
-                        access_attr = self.to_riscos_access(path = path)
-                        
-                        # Use a default value for the object type.
-                        object_type = 0x2
-                        
-                        # Use the inode of the directory as its handle.
-                        handle = os.stat(path)[os.path.stat.ST_INO] & 0xffffffff
+                        filetype, date, length, access_attr, object_type, \
+                            handle = self.read_path_info(path)
                         
                         # Keep this handle for possible later use.
                         self.handles[handle] = (path, length)
@@ -1750,7 +1744,7 @@ class Peer(Common):
                     
                         # A file
                         
-                        filetype, data, length, access_attr, object_type, \
+                        filetype, date, length, access_attr, object_type, \
                             handle = self.read_path_info(path)
                         
                         # Keep this handle for possible later use.
@@ -1774,8 +1768,6 @@ class Peer(Common):
                     
                         # Reply with an error message.
                         msg = ["E"+data[1:4], 0x100d6, "Not found"]
-                
-                self.log("sent", msg, address)
                 
                 # Send a reply.
                 self._send_list(msg, _socket, address)
@@ -1814,8 +1806,6 @@ class Peer(Common):
             
                 msg = ["E"+data[1:4], 0x163ac, "Shared disc not available."]
             
-            self.log("sent", msg, address)
-            
             self._send_list(msg, _socket, address)
         
         elif command == "A" and code == 0x9:
@@ -1842,7 +1832,6 @@ class Peer(Common):
             
                 msg = ["E"+data[1:4], 0x163ac, "Shared disc not available."]
             
-            self.log("sent", msg, address)
             self._send_list(msg, _socket, address)
         
         elif command == "A" and code == 0xa:
@@ -1870,8 +1859,6 @@ class Peer(Common):
             
             # If we can accept the file then respond with a terse reply.
             msg = ["R"+data[1:4], 0]
-            
-            self.log("sent", msg, address)
             
             self._send_list(msg, _socket, address)
         
@@ -2169,6 +2156,10 @@ class Peer(Common):
         else:
         
             self.log("received", data, address)
+        
+        if msg is not None:
+        
+            self.log("sent", msg, address)
     
     def listen(self, event):
     
@@ -2496,14 +2487,14 @@ class Peer(Common):
         # Wait for a reply.
         replied, data = self._expect_reply(s, msg, host, new_id, commands)
         
-        if replied == 1:
-        
-            self.log("received", data, (host, 49171))
-        
-        else:
-        
-            # The data value is a tuple if an error occurs.
-            self.log("received", data[1], (host, 49171))
+        #if replied == 1:
+        #
+        #    self.log("received", data, (host, 49171))
+        #
+        #else:
+        #
+        #    # The data value is a tuple if an error occurs.
+        #    self.log("received", data[1], (host, 49171))
         
         return replied, data
     
@@ -2528,9 +2519,9 @@ class Peer(Common):
                  "handle": handle,
                  "isdir": (object_type == 0x2) }
     
-    def info(self, name, host):
+    def open(self, name, host):
     
-        """info(self, name, host)
+        """open(self, name, host)
         
         Open a share of a given name on the host specified.
         """
@@ -2647,10 +2638,12 @@ class Peer(Common):
         # Return the catalogue information.
         return files
     
+    cat = catalogue
+    
     def get(self, name, host):
     
         # Read the object's information.
-        info = self.info(name, host)
+        info = self.open(name, host)
         
         if info is None:
         
@@ -2737,20 +2730,20 @@ class Peer(Common):
         
         return string.join(file_data, "")
     
-    def _close(self, name, host, handle = None):
+    def _close(self, name, host, handle):
     
-        if handle is None:
-        
-            # Read the object's information.
-            info = self.info(name, host)
-            
-            if info is None:
-            
-                return
-            
-            # Use the file handle obtained from the information retrieved about
-            # this object to close the resource.
-            handle = info["handle"]
+        #if handle is None:
+        #
+        #    # Read the object's information.
+        #    info = self.open(name, host)
+        #    
+        #    if info is None:
+        #    
+        #        return
+        #    
+        #    # Use the file handle obtained from the information retrieved about
+        #    # this object to close the resource.
+        #    handle = info["handle"]
         
         msg = ["A", 0xa, handle]
         replied, data = self._send_request(msg, host, ["R"])
@@ -2799,7 +2792,7 @@ class Peer(Common):
         
         print ros_path
         
-        # Create a message to send indicating that a file is to be uploaded.
+        # Create a file on the remote server.
         msg = ["A", 0x4, 0, ros_path+"\x00"]
         
         # Send the request.
@@ -2813,44 +2806,28 @@ class Peer(Common):
         # created remote file.
         info = self._read_file_info(data)
         
-        # Send a follow up request.
-        msg = ["A", 0xf, info["handle"], 0]
+        #info = self.open(ros_path, host)
         
-        # Send the request.
-        replied, data = self._send_request(msg, host, ["R"])
+        if info is None:
         
-        if replied == 0:
-        
-            return
-        
-        # Send the new name.
-        msg = ["A", 0x7, 0x3, 0, ros_path + "\x00"]
-        
-        # Send the request.
-        replied, data = self._send_request(msg, host, ["R"])
-        
-        if replied == 0:
-        
-            return
-        
-        # Send the new filetype and data.
-        msg = ["A", 0x10, 0, info["handle"], filetype, date]
-        
-        # Send the request.
-        replied, data = self._send_request(msg, host, ["R"])
-        
-        if replied == 0:
-        
+            print "Object not found"
             return
         
         # Send the new length of the file.
-        msg = ["A", 0xc, info["handle"], 0, length]
+        # If we specify the final word (length word) as zero then this
+        # appears to work. This may be because the remote file has been
+        # created with zero length.
+        msg = ["A", 0xc, info["handle"], 0, 0] # length]
         
         # Send the request.
         replied, data = self._send_request(msg, host, ["R"])
         
         if replied == 0:
         
+            # Tidy up.
+            self._close(name, host, handle = info["handle"])
+            
+            self.delete(name, host)
             return
         
         return data
