@@ -120,6 +120,52 @@ class Common:
         
         return "%s" % self.number(3, self._id)
     
+    def interpret(self, data):
+    
+        lines = []
+        
+        i = 0
+        
+        while i < len(data):
+        
+            # Print the data in big-endian word form.
+            words = []
+            j = i
+            
+            while j < len(data) and j < (i + 16):
+            
+                if j <= len(data) - 4:
+                
+                    word = self.str2num(4, data[j:j+4])
+                
+                else:
+                
+                    word = self.str2num(len(data) - j, data[j:])
+                
+                words.append("%08x" % word)
+                
+                j = j + 4
+            
+            words = string.join(words, " ")
+            
+            if len(words) < 35: words = words + (35 - len(words)) * " "
+            
+            # Show the data in string form.
+            s = ""
+            
+            for c in data[i:i+16]:
+            
+                if ord(c) > 31 and ord(c) < 127:
+                    s = s + c
+                else:
+                    s = s + "."
+            
+            lines.append("%s : %s\n" % (words, s))
+            
+            i = i + 16
+        
+        return lines
+    
     def _encode(self, l):
     
         """
@@ -144,6 +190,10 @@ class Common:
             else:
             
                 # Pad the string to fit an integer number of words.
+                # If the string is to be terminated by a particular
+                # character, it should have been included with the
+                # string.
+                
                 padding = 4 - (len(item) % 4)
                 
                 if padding == 4: padding = 0
@@ -185,6 +235,25 @@ class Common:
 #        
 #        return string.join(output, "")
     
+    to_riscos = {".": "/", " ": "\xa0"}
+    
+    def riscos_filename(self, name):
+    
+        new = []
+        
+        for c in name:
+        
+            if self.to_riscos.has_key(c):
+            
+                new.append(self.to_riscos[c])
+            
+            else:
+            
+                new.append(c)
+        
+        return string.join(new, "")
+
+
 
 class Access(Common):
 
@@ -363,46 +432,6 @@ class Access(Common):
         
         self.ports[49171] = self._share_l
     
-    def interpret(self, data):
-    
-        lines = []
-        
-        i = 0
-        
-        while i < len(data):
-        
-            # Print the data in big-endian word form.
-            words = []
-            j = i
-            
-            while j <= (len(data) - 4) and j < (i + 16):
-            
-                word = self.str2num(4, data[j:j+4])
-                
-                words.append("%08x" % word)
-                
-                j = j + 4
-            
-            words = string.join(words, " ")
-            
-            if len(words) < 35: words = words + (35 - len(words)) * " "
-            
-            # Show the data in string form.
-            s = ""
-            
-            for c in data[i:i+16]:
-            
-                if ord(c) > 31 and ord(c) < 127:
-                    s = s + c
-                else:
-                    s = s + "."
-            
-            lines.append("%s : %s\n" % (words, s))
-            
-            i = i + 16
-        
-        return lines
-    
     def _read_port(self, port):
     
         if not self.ports.has_key(port):
@@ -527,9 +556,11 @@ class Access(Common):
         
             self._send_list(data, s, (self.broadcast, 32770))
             
-            time.sleep(delay)
+            t0 = time.time()
             
-            if event.isSet(): return
+            while (time.time() - t0) < delay:
+            
+                if event.isSet(): return
     
     def broadcast_share(self, name, event, protected = 0, delay = 30):
     
@@ -589,9 +620,11 @@ class Access(Common):
         
             self._send_list(data, s, (self.broadcast, 32770))
             
-            time.sleep(delay)
+            t0 = time.time()
             
-            if event.isSet(): return
+            while (time.time() - t0) < delay:
+            
+                if event.isSet(): return
         
         # Broadcast that the share has now been removed.
         
@@ -644,15 +677,12 @@ class Access(Common):
         
         while 1:
         
-            t0 = time.time()
-            
             self._send_list(data, s, (self.broadcast, 49171))
             
-            while int(time.time() - t0) < delay:
+            t0 = time.time()
             
-                # Read any response.
-                #response = self.read_share_socket(s)
-                
+            while (time.time() - t0) < delay:
+            
                 if event.isSet(): return
         
         # Broadcast that the share has now been removed.
@@ -1132,6 +1162,14 @@ class Access(Common):
     
         print "From: %s:%i" % address
         
+        lines = self.interpret(data)
+        
+        for line in lines:
+        
+            print line
+        
+        print
+        
         host = address[0]
         
         if data[0] == "A":
@@ -1148,10 +1186,18 @@ class Access(Common):
                 # For unprotected shares, reply with details of the share.
                 
                 # Use the first word given but substitute "R" for "A".
-                self._send_list(
-                    ["R"+data[1:4], 0xffffcd00, 0, 0x800, 0x13, 0x102, 0],
-                    _socket, address
-                    )
+                msg = ["R"+data[1:4], 0xffffcd00, 0, 0x800, 0x13, 0x102, 0]
+                
+                print "Sent:"
+                for line in self.interpret(self._encode(msg)):
+                
+                    print line
+                print
+                
+                #msg = "R"+data[1:4] + '\x00\xcd\xff\xff\x00\x00\x00\x00\x00\x08\x00\x00\x13\x00\x00\x00\x02\x01\x00\x00\x01:\xa6\x04'
+                
+                self._send_list(msg, _socket, address)
+                #_socket.sendto(msg, address)
             
             else:
             
@@ -1173,126 +1219,183 @@ class Access(Common):
             
             try:
             
-                # For unprotected shares, return a catalogue to the client.
+#                # For unprotected shares, return a catalogue to the client.
+#                
+#                thread, direct = self.shares[(share_name, self.hostaddr)]
+#                
+#                files = os.listdir(direct)
+#                
+#                # Write the message, starting with the code and ID word.
+#                msg = ["S"+data[1:4]]
+#                
+#                # Write the catalogue information.
+#                
+#                # The first word is the length of the directory structure
+#                # in bytes beginning with the next word.
+#                # Calculate this later.
+#                msg.append(0)
+#                
+#                dir_length = 0
+#                
+#                # The next word is the directory name.
+#                msg.append("$")
+#                dir_length = dir_length + 4
+#                
+#                n_files = 0
+#                
+#                for file in files:
+#                
+#                    file_msg = []
+#                    length = 0
+#                    
+#                    path = os.path.join(direct, file)
+#                    
+#                    try:
+#                    
+#                        # Filetype word
+#                        if os.path.isdir(path):
+#                        
+#                            file_msg.append(0xfffffd49)
+#                        
+#                        else:
+#                        
+#                            file_msg.append(0xffffff4b)
+#                        
+#                        length = length + 4
+#                        
+#                        # Unknown word
+#                        file_msg.append(0)
+#                        length = length + 4
+#                        
+#                        # Length word (0x800 for directory)
+#                        if os.path.isdir(path):
+#                        
+#                            file_msg.append(0x800)
+#                        
+#                        else:
+#                        
+#                            file_msg.append(os.path.getsize(path))
+#                        
+#                        length = length + 4
+#                        
+#                        # Flags word (0x10 for directory)
+#                        if os.path.isdir(path):
+#                        
+#                            file_msg.append(0x10)
+#                        
+#                        else:
+#                        
+#                            file_msg.append(0x03)
+#                        
+#                        length = length + 4
+#                        
+#                        # Flags word (0x2 for directory)
+#                        if os.path.isdir(path):
+#                        
+#                            file_msg.append(0x02)
+#                        
+#                        else:
+#                        
+#                            file_msg.append(0x01)
+#                        
+#                        length = length + 4
+#                        
+#                        # Convert the name into a form suitable for the
+#                        # other client.
+#                        file_name = self.riscos_filename(file)
+#                        
+#                        # Zero terminated name string
+#                        name_string = self._encode([file_name + "\000"])
+#                        
+#                        file_msg.append(name_string)
+#                        
+#                        length = length + len(name_string)
+#                        
+#                        n_files = n_files + 1
+#                    
+#                    except OSError:
+#                    
+#                        file_msg = []
+#                        length = 0
+#                    
+#                    msg = msg + file_msg
+#                    dir_length = dir_length + length
+#                
+#                # The data following the directory structure is concerned
+#                # with the share and is like a return value from a share
+#                # open request but with a "B" command word like a
+#                # catalogue request.
+#                msg = msg + \
+#                [
+#                    "B"+data[1:4], 0xffffcd00, 0x00000000, 0x00000800,
+#                       0x00000013, 0x00000002, 0x00000000, dir_length,
+#                       0xffffffff
+#                ]
+#                
+#                # Fill in the directory length.
+#                msg[1] = dir_length
+#                
+#                # Send the reply.
+#                self._send_list(msg, _socket, address)
                 
-                thread, direct = self.shares[(share_name, self.hostaddr)]
-                
-                files = os.listdir(direct)
-                
-                # Write the message, starting with the code and ID word.
-                msg = ["S"+data[1:4]]
-                
-                # Write the catalogue information.
-                
-                # The first word is the length of the directory structure
-                # in bytes beginning with the next word.
-                # Calculate this later.
-                msg.append(0)
-                
-                dir_length = 0
-                
-                # The next word is the directory name.
-                msg.append("$")
-                dir_length = dir_length + 4
-                
-                n_files = 0
-                
-                for file in files:
-                
-                    file_msg = []
-                    length = 0
-                    
-                    path = os.path.join(direct, file)
-                    
-                    try:
-                    
-                        # Filetype word
-                        if os.path.isdir(path):
-                        
-                            file_msg.append(0xfffffd49)
-                        
-                        else:
-                        
-                            file_msg.append(0xffffff4b)
-                        
-                        length = length + 4
-                        
-                        # Unknown word
-                        file_msg.append(0)
-                        length = length + 4
-                        
-                        # Length word (0x800 for directory)
-                        if os.path.isdir(path):
-                        
-                            file_msg.append(0x800)
-                        
-                        else:
-                        
-                            file_msg.append(os.path.getsize(path))
-                        
-                        length = length + 4
-                        
-                        # Flags word (0x10 for directory)
-                        if os.path.isdir(path):
-                        
-                            file_msg.append(0x10)
-                        
-                        else:
-                        
-                            file_msg.append(0x03)
-                        
-                        length = length + 4
-                        
-                        # Flags word (0x2 for directory)
-                        if os.path.isdir(path):
-                        
-                            file_msg.append(0x02)
-                        
-                        else:
-                        
-                            file_msg.append(0x01)
-                        
-                        length = length + 4
-                        
-                        # Zero terminated name string
-                        name_string = self._encode([file + "\000"])
-                        
-                        file_msg.append(name_string)
-                        
-                        length = length + len(name_string)
-                        
-                        n_files = n_files + 1
-                    
-                    except OSError:
-                    
-                        file_msg = []
-                        length = 0
-                    
-                    msg = msg + file_msg
-                    dir_length = dir_length + length
-                
-                # The data following the directory structure is concerned
-                # with the share and is like a return value from a share
-                # open request but with a "B" command word like a
-                # catalogue request.
-                msg = msg + \
+#                msg = \
+#                [
+#                    "S"+data[1:4], 0x00000020, 0x00000024, 0xfffffd49,
+#                       0x00000000, 0x00000800, 0x00000010, 0x00000002,
+#                       '!Boot\x00',         "B"+data[1:4], 0xffffcd00,
+#                       0x00000000, 0x00000800, 0x00000013, 0x00000000,
+#                       0x00000000, 0x00000010, 0xffffffff
+#                    #              Root entry?
+#                ]
+
+                msg = \
                 [
-                    "B"+data[1:4], 0xffffcd00, 0, 0x800,
-                    0x13, 0, 0, dir_length,
-                    0xffffffff
+                    "S"+data[1:4], 0x00000164, 0x00000024, 0xfffffd49,
+                       0x3edb7498, 0x00000800, 0x00000010, 0x00000002,
+                    #  Unknown (0)
+                       '!Boot\x00',            0xfffffd49, 0x3edbc788,
+                       0x00000800, 0x00000010, 0x00000002, 'Apps\x00',
+                       0xfffffd49, 0x3edc21cf, 0x00000800,
+                    #              Unknown (0)
+                       0x00000010, 0x00000002, 'Diversions\x00',
+                                   0xfffffd49, 0x3ee2c0fa, 0x00000800,
+                    #                          Unknown (0)
+                       0x00000010, 0x00000002, 'home\x00',
+                       0xfffffd49, 0x3ee2c386, 0x00000800, 0x00000010,
+                    #              Unknown (0)
+                       0x00000002, 'LaTeX\x00',            0xfffffd49,
+                       0x3edc6049, 0x00000800, 0x00000010, 0x00000002,
+                    #  Unknown (0)
+                       'Manuals\x00',          0xfffffd49, 0x3edfa359,
+                    #                                      Unknown (0)
+                       0x00000800, 0x00000010, 0x00000002, 'Personal\x00',
+                                               0xfffff54b, 0x00000000,
+                    #                                      Unknown (0)
+                       0x000099cc, 0x00000003, 0x00000001, 'Printout\x00',
+                                               0xffffff4b, 0xc9836700,
+                    #                                      Unknown (0)
+                       0x000099cc, 0x00000009, 0x00000001, 'Printout3\x00',
+                                               0xfffffd49, 0x3edcb9cd,
+                    #                                      Unknown (0)
+                       0x00000800, 0x00000010, 0x00000002, 'Public\x00',
+                                   0xfffffd49, 0x3edd06c9, 0x00000800,
+                    #                          Unknown (0)
+                       0x00000010, 0x00000002, 'Utilities\x00',
+                                   0xfffffd49, 0x3edefe4c, 0x00000800,
+                       0x00000010, 0x00000002, 'Work\x00',
+                    "B"+data[1:4], 0xffffcd00, 0x00000000, 0x00000800,
+                       0x00000013, 0x00000002, 0x00000000, 0x00000164,
+                    #              Unknown (0) Unknown (0)
+                       0xffffffff
                 ]
                 
-                # Fill in the directory length.
-                msg[1] = dir_length
-                
                 print
-                print "Sent: %i files" % n_files
+                print "Sent:"
                 for line in self.interpret(self._encode(msg)):
                 
                     print line
                 print
                 
-                # Send the reply.
                 self._send_list(msg, _socket, address)
             
             except (KeyError, OSError):
@@ -1302,6 +1405,16 @@ class Access(Common):
                     ["E"+data[1:4], 0x163ac, "Shared disc not available."],
                     _socket, address
                     )
+        
+        elif data[0] == "B" and self.str2num(4, data[4:8]) == 0xd:
+        
+            # Rebroadcasted request for information.
+            
+            # Reply with an error message.
+            self._send_list(
+                ["E"+data[1:4], 0x163ac, "Shared disc not available."],
+                _socket, address
+                )
         
         elif data[0] == "R":
         
@@ -1322,14 +1435,6 @@ class Access(Common):
                 self.read_string(data[8:], ending = "\000", include = 0),
                 self.str2num(4, data[4:8])
                 )
-        
-        lines = self.interpret(data)
-        
-        for line in lines:
-        
-            print line
-        
-        print
     
     def listen(self, event):
     
@@ -1591,10 +1696,16 @@ class Access(Common):
         
         data = ["A"+new_id, 1, 0, name]
         
+        # Send the request.
         self._send_list(data, s, (host, 49171))
         
         replied = 0
-        while replied == 0:
+        tries = 5
+        
+        # Keep a record of the time of the previous request.
+        t0 = time.time()
+        
+        while replied == 0 and tries > 0:
         
             # See if the response has arrived.
             for data in self.share_messages:
@@ -1614,9 +1725,24 @@ class Access(Common):
                     self.share_messages.remove(data)
                     
                     return
+            
+            t1 = time.time()
+            
+            if replied == 0 and (t1 - t0) > 1.0:
+            
+                # Send the request again.
+                self._send_list(data, s, (host, 49171))
+                
+                t0 = t1
+                tries = tries - 1
+        
+        if replied == 0:
+        
+            print "The machine containing the shared disc does not respond"
+            return
         
         # Set the open share details.
-        self.open_shares[(name, host)] = new_id
+        self.open_shares[(name, host)] = None
     
     def catalogue(self, name, host):
     
@@ -1648,10 +1774,16 @@ class Access(Common):
         
         data = ["B"+new_id, 3, 0xffffffff, 0, name]
         
+        # Send the request.
         self._send_list(data, s, (host, 49171))
         
         replied = 0
-        while replied == 0:
+        tries = 5
+
+        # Keep a record of the time of the previous request.
+        t0 = time.time()
+        
+        while replied == 0 and tries > 0:
         
             # See if the response has arrived.
             for data in self.share_messages:
@@ -1659,6 +1791,8 @@ class Access(Common):
                 if data[:4] == "S"+new_id:
                 
                     self.share_messages.remove(data)
+                    
+                    self.data = data
                     
                     # Catalogue information was returned.
                     self.open_shares[(name, host)] = new_id
@@ -1671,6 +1805,21 @@ class Access(Common):
                     self.share_messages.remove(data)
                     
                     return []
+            
+            t1 = time.time()
+            
+            if replied == 0 and (t1 - t0) > 1.0:
+            
+                # Send the request again.
+                self._send_list(data, s, (host, 49171))
+                
+                t0 = t1
+                tries = tries - 1
+        
+        if replied == 0:
+        
+            print "The machine containing the shared disc does not respond"
+            return
         
         # Read the catalogue information.
         c = 4
@@ -1734,50 +1883,5 @@ class Access(Common):
         # open request but with a "B" command word like a
         # catalogue request.
         
-        # Follow up with another directory request.
-        
-        #new_id = self.new_id()
-        
-        # Include the directory length returned from the other client in
-        # the next request. This was found from the other client's follow
-        # up requests to our client for directory information.
-        # Presumably, this indicates that a certain amount of space has
-        # been reserved for the data.
-        #word = files[0][0]
-        #print hex(word)
-        
-        new_id = self.number(3, self._id ^ 0x7007)
-        
-        data = ["B"+new_id, 0xd, dir_length, 0, 0x801]
-        
-        print "Sent:"
-        for line in self.interpret(self._encode(data)):
-        
-            print line
-        print
-        
-        self._send_list(data, s, (host, 49171))
-        
-        replied = 0
-        while replied == 0:
-        
-            # See if the response has arrived.
-            for data in self.share_messages:
-            
-                if data[:4] == "S"+new_id:
-                
-                    self.share_messages.remove(data)
-                    
-                    # Catalogue information was returned.
-                    self.open_shares[(name, host)] = new_id
-                    replied = 1
-                    
-                    break
-                
-                elif data[:4] == "E"+new_id:
-                
-                    self.share_messages.remove(data)
-                    
-                    return []
-        
-        return lines
+        # The second to last word is the root entry.
+        self.open_shares[(name, host)] = self.str2num(4, data[-8:-4])
