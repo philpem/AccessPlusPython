@@ -268,7 +268,7 @@ class Common:
         # Construct the filetype and date words.
         
         # Determine the relevant filetype to use.
-        filetype, filename = self.suffix_to_filetype(path)
+        filetype, discard_filename = self.suffix_to_filetype(path)
         
         # The number of seconds since the last modification
         # to the file is read.
@@ -940,7 +940,58 @@ class File:
         
         # Remove data now that it has been written.
         self.pieces = []
+
+
+class Buffer:
+
+    def __init__(self):
     
+        self.pieces = []
+        self.ptr = 0
+        self._length = 0
+    
+    def read(self):
+    
+        # Assume data fragments in the buffer do not overlap.
+        self.pieces.sort()
+        
+        data = reduce(lambda x, y: x + y[1], self.pieces, "")
+        
+        return data
+    
+    def write(self, data):
+    
+        self.pieces.append( (self.ptr, data) )
+        self.ptr = self.ptr + len(data)
+        self._length = max(self.ptr, self._length)
+    
+    def seek(self, ptr, from_end):
+    
+        if from_end == 0:
+        
+            self.ptr = ptr
+        
+        elif from_end == 1:
+        
+            self.ptr = self.ptr + ptr
+        
+        else:
+        
+            self.ptr = self._length - ptr
+    
+    def length(self):
+    
+        return self._length
+    
+    def set_length(self, length):
+    
+        self._length = length
+    
+    def close(self):
+    
+        # Do nothing.
+        return
+
 class Directory:
 
     def __init__(self, path, share):
@@ -1148,7 +1199,7 @@ class Translate:
     
         return self._filename(name, self.from_riscos)
     
-    def suffix_to_filetype(self, filename):
+    def suffix_to_filetype(self, filename, present = "truncate"):
     
         # Find the appropriate filetype to use for the filename given.
         at = string.rfind(filename, os.extsep)
@@ -1170,9 +1221,16 @@ class Translate:
                 # Return the corresponding filetype for this suffix.
                 try:
                 
-                    # Remove the suffix before presenting it to RISC OS.
-                    return string.atoi(mapping["Hex"], 16), \
-                        self.to_riscos_filename(filename)[:at]
+                    if present == "truncate":
+                    
+                        # Remove the suffix before presenting it to RISC OS.
+                        return string.atoi(mapping["Hex"], 16), \
+                            self.to_riscos_filename(filename)[:at]
+                    
+                    else:
+                    
+                        return string.atoi(mapping["Hex"], 16), \
+                            self.to_riscos_filename(filename)
                    
                 except ValueError:
                 
@@ -1181,8 +1239,25 @@ class Translate:
                     return DEFAULT_FILETYPE, \
                         self.to_riscos_filename(filename)
         
-        # No mappings declared the suffix used.
-        return DEFAULT_FILETYPE, self.to_riscos_filename(filename)
+        # Check whether the filename included a hexadecimal suffix.
+        try:
+        
+            value = string.atoi(suffix[len(os.extsep):], 16)
+        
+        except ValueError:
+        
+            # No mappings declared the suffix used.
+            return DEFAULT_FILETYPE, self.to_riscos_filename(filename)
+        
+        # A hexadecimal suffix was used.
+        if present == "truncate":
+        
+            # Remove the suffix before presenting it to RISC OS.
+            return value, self.to_riscos_filename(filename)[:at]
+        
+        else:
+        
+            return value, self.to_riscos_filename(filename)
     
     def filetype_to_suffix(self, filename, filetype):
     
@@ -1224,8 +1299,11 @@ class Translate:
         
         else:
         
-            # No mappings declared the filetype used.
-            return self.from_riscos_filename(filename) + DEFAULT_SUFFIX
+            # No mappings declared the filetype used. Append a suffix
+            # containing the three digit hexadecimal filetype value to the
+            # end of the name.
+            return self.from_riscos_filename(filename) + os.extsep + \
+                "%03x" % filetype
     
     def find_relevant_file(self, path, suffix = None):
     
@@ -1496,6 +1574,7 @@ class Share(Ports, Translate):
         
         # Record the relevant information about the share.
         
+        self.name = name
         self.thread = thread
         self.directory = directory
         self.date = date
@@ -1848,6 +1927,13 @@ class Share(Ports, Translate):
         
             return None, path
         
+        # Find whether the directory structure can be legitimately descended.
+        path, rest = self.descend_path(path, check_mode = self.write_mask)
+        
+        if rest != []:
+        
+            return None, path
+        
         self.log("comment", "Delete request: %s" % path, "")
         
         filetype, date, length, access_attr, object_type, \
@@ -1888,6 +1974,13 @@ class Share(Ports, Translate):
         
             return None, path
         
+        # Find whether the directory structure can be legitimately descended.
+        path, rest = self.descend_path(path, check_mode = self.write_mask)
+        
+        if rest != []:
+        
+            return None, path
+        
         # Convert the RISC OS attributes to a mode value.
         mode = self.from_riscos_access(access_attr)
         
@@ -1922,29 +2015,95 @@ class Share(Ports, Translate):
         
             return None, path
     
-    def rename_path(self, ros_path):
+    def rename_path(self, event, reply_id, pos, amount, buf, ros_path,
+                    _socket, address, fn):
     
-        # Try to open the corresponding file.
-        info, path = self.open_path(ros_path)
+        # Convert the RISC OS style path to a path within the share.
+        path = self.from_riscos_path(ros_path)
         
         if ros_path == "":
         
             # The share itself is being referenced.
-            return None, path
+            return
         
-        return info, path
+        if path is None: return
+        
+        # Find whether the directory structure can be legitimately descended.
+        path, rest = self.descend_path(path, check_mode = self.write_mask)
+        
+        if rest != []: return None
+        
+        if self.present == "truncate":
+        
+            # Check for a file suffix to determine the filetype of the file.
+            # We will need to remember this when we rename the file in order
+            # to maintain the correct type.
+            at = string.rfind(path, ".")
+            
+            if at != -1:
+            
+                suffix = path[at:]
+            
+            else:
+            
+                suffix = ""
+        
+        # Call the function to receive the filename.
+        share_name, new_ros_path = fn(
+            event, reply_id, pos, amount, buf, _socket, address
+            )
+        
+        if share_name != self.name: return None
+        
+        if new_ros_path is None: return None
+        
+        # Convert the RISC OS style path to a path within the share.
+        new_path = self.from_riscos_path(new_ros_path, find_obj = 0)
+        
+        if new_ros_path == "":
+        
+            # The share itself is being referenced.
+            return None
+        
+        if new_path is None: return None
+        
+        # Find whether the directory structure can be legitimately descended.
+        parent_path, file = os.path.split(new_path)
+        
+        write_path, rest = self.descend_path(
+            parent_path, check_mode = self.write_mask
+            )
+        
+        if rest != []: return None
+        
+        if self.present == "truncate":
+        
+            # Append the suffix recorded before to the new path.
+            new_path = new_path + suffix
+        
+        try:
+        
+            os.rename(path, new_path)
+        
+        except OSError:
+        
+            pass
     
     def set_filetype(self, fh, filetype_word, date_word):
     
-        # Convert the file's path to a RISC OS style filetype and path.
-        filetype, ros_path = self.suffix_to_filetype(fh.path)
-        
         # Find the filetype and date from the words given.
         filetype, date = \
             self.take_riscos_filetype_date(filetype_word, date_word)
+            
+        # Only change the filename to change the filetype if we are using
+        # a presentation policy based on truncating filenames before their
+        # suffixes.
         
-        if os.path.isfile(fh.path):
+        if os.path.isfile(fh.path) and self.present == "truncate":
         
+            # Convert the file's path to a RISC OS style filetype and path.
+            discard_filetype, ros_path = self.suffix_to_filetype(fh.path)
+            
             # Determine the correct suffix to use for the file.
             new_path = self.filetype_to_suffix(ros_path, filetype)
             
@@ -1985,6 +2144,13 @@ class Share(Ports, Translate):
         if path is None:
         
             return None, "Not found", path
+        
+        # Find whether the directory structure can be legitimately descended.
+        path, rest = self.descend_path(path, check_mode = self.read_mask)
+        
+        if rest != []:
+        
+            return None, "Access denied", path
         
         try:
         
@@ -2029,7 +2195,8 @@ class Share(Ports, Translate):
             try:
             
                 # Filetype word
-                filetype, filename = self.suffix_to_filetype(file)
+                filetype, filename = \
+                    self.suffix_to_filetype(file, present = self.present)
                 
                 # Construct the filetype and date words.
                 
@@ -2655,7 +2822,8 @@ class RemoteShare(Ports, Translate):
         
         self.log("comment", "File to put: %s" % file, "")
         
-        filetype, ros_file = self.suffix_to_filetype(file)
+        filetype, ros_file = \
+            self.suffix_to_filetype(file, present = self.present)
         
         self.log("comment", "Remote file: %s" % ros_file, "")
         
@@ -2886,7 +3054,8 @@ class RemoteShare(Ports, Translate):
         
         self.log("comment", "File to put: %s" % file, "")
         
-        filetype, ros_file = self.suffix_to_filetype(file)
+        filetype, ros_file = \
+            self.suffix_to_filetype(file, present = self.present)
         
         self.log("comment", "Remote file: %s" % ros_file, "")
         
@@ -3674,9 +3843,9 @@ class Peer(Ports):
         
         end = start + amount
         
-        self.log("comment", "Position: %i" % pos, "")
-        self.log("comment", "Expected amount of data: %i" % amount, "")
-        self.log("comment", "End at: %i" % end, "")
+        #self.log("comment", "Position: %i" % pos, "")
+        #self.log("comment", "Expected amount of data: %i" % amount, "")
+        #self.log("comment", "End at: %i" % end, "")
         
         # Read the host name from the address tuple.
         host = address[0]
@@ -3698,7 +3867,7 @@ class Peer(Ports):
                 # are relative to the start address it passed to us.
                 msg = ["w", pos - start, 0, pos + packet_size - start]
                 
-                self.log("comment", repr(msg), "")
+                #self.log("comment", repr(msg), "")
                 
                 # Send the request.
                 replied, data = self._send_request(
@@ -3722,10 +3891,10 @@ class Peer(Ports):
                         # client.
                         data_pos = self.str2num(4, data[4:8]) + start
                         
-                        self.log(
-                            "comment",
-                            "Data position (%x) file position (%x)" % (data_pos, pos), ""
-                            )
+                        #self.log(
+                        #    "comment",
+                        #    "Data position (%x) file position (%x)" % (data_pos, pos), ""
+                        #    )
                         
                         file_data = data[8:]
                         
@@ -3733,15 +3902,15 @@ class Peer(Ports):
                         
                         #self.log("comment", file_data, "")
                         
-                        self.log("comment", "File position: %i" % data_pos, "")
+                        #self.log("comment", "File position: %i" % data_pos, "")
                         
                         fh.write(file_data)
                         pos = data_pos + len(file_data)
                         
-                        self.log(
-                            "comment",
-                            "Read a total of %i bytes of file %s" % (pos, fh.path), ""
-                            )
+                        #self.log(
+                        #    "comment",
+                        #    "Read a total of %i bytes of file %s" % (pos, fh.path), ""
+                        #    )
                     
                     else:
                     
@@ -3752,10 +3921,10 @@ class Peer(Ports):
                         
                             # A short block was received which indicates
                             # that all the data was read.
-                            self.log(
-                                "comment",
-                                "Short block encountered at end of data.", ""
-                                )
+                            #self.log(
+                            #    "comment",
+                            #    "Short block encountered at end of data.", ""
+                            #    )
                             break
                 
                 else:
@@ -3787,14 +3956,14 @@ class Peer(Ports):
         # Remove all relevant messages from the message list.
         messages = self.share_messages._all_messages(["d"], reply_id)
         
-        self.log("comment", "Discarded messages:", "")
-        for msg in messages:
-        
-            for line in self.interpret(msg):
-            
-                self.log("comment", line, "")
-            
-            self.log("comment", "", "")
+        #self.log("comment", "Discarded messages:", "")
+        #for msg in messages:
+        #
+        #    for line in self.interpret(msg):
+        #    
+        #        self.log("comment", line, "")
+        #    
+        #    self.log("comment", "", "")
     
     def send_file(self, event, reply_id, code, handle, start, length, fh,
                   _socket, address):
@@ -3901,6 +4070,27 @@ class Peer(Ports):
                 self.log("comment", line, "")
             
             self.log("comment", "", "")
+    
+    def rename_path(self, event, reply_id, pos, amount, buf,
+                    _socket, address):
+    
+        # Call the function to receive the filename.
+        self.receive_file(event, reply_id, pos, amount, buf, _socket, address)
+        
+        # We should now have the replacement file in the Buffer object
+        # passed by the caller.
+        value = buf.read()
+        
+        cleaned = ""
+        
+        for c in value:
+        
+            if ord(c) > 31: cleaned = cleaned + c
+        
+        # Extract the share name and share path from the new path.
+        share_name, new_ros_path = self.read_share_path(cleaned)
+        
+        return share_name, new_ros_path
     
     def read_poll_socket(self):
     
@@ -4569,6 +4759,7 @@ class Peer(Ports):
             elif code == 0x9:
             
                 # Rename file on our machine.
+                amount = self.str2num(4, data[8:12])
                 
                 # Find the share and RISC OS path within it.
                 share_name, ros_path = self.read_share_path(data[16:])
@@ -4576,24 +4767,57 @@ class Peer(Ports):
                 try:
                 
                     share = self.shares[(share_name, Hostaddr)]
-                    info, path = share.rename_path(ros_path)
                     
-                    print "Rename:", path
+                    # Extract the host name from the address as it is assumed that
+                    # communication will be through port 49171.
+                    host = address[0]
                     
-                    if info is not None:
+                    # Start a new thread to request and handle the incoming data.
                     
-                        msg = [ "R"+reply_id ] + info
+                    # Create a lock to prevent multiple threads working on the
+                    # same file at the same time.
+                    if self.transfers.has_key(ros_path):
                     
-                    else:
+                        thread, host = self.transfers[ros_path]
+                        
+                        while thread.isAlive():
+                        
+                            pass
                     
-                        msg = ["E"+reply_id, 0x100d6, "Not found"]
+                    # Create an event to use to inform the thread that it terminate.
+                    event = threading.Event()
+                    
+                    # Record the event in the transfer events dictionary.
+                    self.transfer_events[ros_path] = event
+                    
+                    # Create a buffer to put the filename in.
+                    buf = Buffer()
+                    
+                    # Create a thread to receive the replacement filename,
+                    # passing the necessary information to do this.
+                    thread = threading.Thread(
+                        group = None, target = share.rename_path,
+                        name = 'Rename request "%s" from %s:%i' % (
+                            ros_path, address[0], address[1]
+                            ),
+                        args = (
+                            event, reply_id, 0, amount, buf, ros_path,
+                            _socket, address, self.rename_path
+                            )
+                        )
+                    
+                    # Record the thread in the transfers dictionary.
+                    self.transfers[ros_path] = thread, host
+                    
+                    # Start the thread.
+                    thread.start()
                 
                 except KeyError:
                 
                     msg = ["E"+reply_id, 0x163ac, "Shared disc not available."]
-                
-                # Send a reply.
-                self._send_list(msg, _socket, address)
+                    
+                    # Send a reply.
+                    self._send_list(msg, _socket, address)
             
             elif code == 0xa:
             
@@ -4631,7 +4855,7 @@ class Peer(Ports):
                 pos = self.str2num(4, data[12:16])
                 length = self.str2num(4, data[16:20])
                 
-                print "Data request", hex(handle), pos, length
+                #print "Data request", hex(handle), pos, length
                 
                 # Extract the host name from the address as it is assumed that
                 # communication will be through port 49171.
@@ -4661,7 +4885,7 @@ class Peer(Ports):
                     # Record the event in the transfer events dictionary.
                     self.transfer_events[path] = event
                     
-                    # Create a thread to run the share broadcast loop.
+                    # Create a thread to send the file.
                     thread = threading.Thread(
                         group = None, target = self.send_file,
                         name = 'Transfer "%s" to %s:%i' % (
@@ -4729,7 +4953,7 @@ class Peer(Ports):
                 # Record the event in the transfer events dictionary.
                 self.transfer_events[path] = event
                 
-                # Create a thread to run the share broadcast loop.
+                # Create a thread to receive the file.
                 thread = threading.Thread(
                     group = None, target = self.receive_file,
                     name = 'Transfer "%s" from %s:%i' % (
@@ -4880,6 +5104,14 @@ class Peer(Ports):
                         )
                 
                 elif trailer == "Not found":
+                
+                    # Reply with an error message.
+                    self._send_list(
+                        ["E"+reply_id, 0x100d6, "Not found"],
+                        _socket, address
+                        )
+                
+                else:
                 
                     # Reply with an error message.
                     self._send_list(
