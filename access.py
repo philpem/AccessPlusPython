@@ -1384,7 +1384,7 @@ class Peer(Common):
                         pass
                     
                     # If 77 files have been listed then list no more.
-                    if n_files == 77: break
+                    #if n_files == 77: break
                 
                 print "%i files found."
                 
