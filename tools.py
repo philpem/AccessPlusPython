@@ -27,6 +27,8 @@ class Access:
         
         self.broadcast = self.hostaddr[:at] + ".255"
         
+        self.identity = "1234"
+        
         # Use just the hostname from the full hostname retrieved.
         
         at = string.find(self.hostname, ".")
@@ -35,28 +37,30 @@ class Access:
         
             self.hostname = self.hostname[:at]
         
-        padding = 4 - (len(self.hostname) % 4)
-        if padding == 4: padding = 0
-        
-        self.pad_hostname = self.hostname + (padding * "\000")
-        
         # Define a dictionary to relate port numbers to the sockets
         # to use.
+        self.broadcasters = {}
         self.ports = {}
         
-        # Create a socket to use for polling.
+        # Create sockets to use for polling.
         self._create_poll_socket()
         
-        # Create a socket to use for listening.
+        # Create sockets to use for listening.
         self._create_listener_socket()
         
-        # Create a socket to use for share details.
+        # Create sockets to use for share details.
         self._create_share_socket()
+        
+        # Create lists of messages sent to each listening socket.
+        self.share_messages = []
+        
+        # Create lists of open shares on other hosts.
+        
     
     def __del__(self):
     
         # Close all sockets.
-        for port, _socket in self.ports.items():
+        for port, _socket in self.broadcasters.items():
         
             print "Closing socket for port %i" % port
             _socket.close()
@@ -73,7 +77,17 @@ class Access:
         
         self._poll_s.bind((self.broadcast, 32770))
         
-        self.ports[32770] = self._poll_s
+        self.broadcasters[32770] = self._poll_s
+        
+        # Create a socket for listening.
+        self._poll_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        # Set the socket to be non-blocking.
+        self._poll_l.setblocking(0)
+        
+        self._poll_l.bind((self.hostname, 32770))
+        
+        self.ports[32770] = self._poll_l
     
     def _create_listener_socket(self):
     
@@ -87,7 +101,17 @@ class Access:
         
         self._listen_s.bind((self.broadcast, 32771))
         
-        self.ports[32771] = self._listen_s
+        self.broadcasters[32771] = self._listen_s
+        
+        # Create a socket for listening.
+        self._listen_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        # Set the socket to be non-blocking.
+        self._listen_l.setblocking(0)
+        
+        self._listen_l.bind((self.hostname, 32771))
+        
+        self.ports[32771] = self._listen_l
     
     def _create_share_socket(self):
     
@@ -101,7 +125,17 @@ class Access:
         
         self._share_s.bind((self.broadcast, 49171))
         
-        self.ports[49171] = self._share_s
+        self.broadcasters[49171] = self._share_s
+        
+        # Create a socket for listening.
+        self._share_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        # Set the socket to be non-blocking.
+        self._share_l.setblocking(0)
+        
+        self._share_l.bind((self.hostname, 49171))
+        
+        self.ports[49171] = self._share_l
     
     def str2num(self, size, s):
         """Convert a string of decimal digits to an integer."""
@@ -132,6 +166,20 @@ class Access:
             size = size - 1
         
         return s
+    
+    def new_id(self):
+    
+        if not hasattr(self, "_id"):
+        
+            self._id = 1
+        
+        else:
+        
+            self._id = self._id + 1
+            if self._id > 0xffffff:
+                self._id = 1
+        
+        return "%s" % self.number(3, self._id)
     
     def _encode(self, l):
     
@@ -206,7 +254,7 @@ class Access:
             words = []
             j = i
             
-            while j < len(data) and j < i + 16:
+            while j <= (len(data) - 4) and j < (i + 16):
             
                 word = self.str2num(4, data[j:j+4])
                 
@@ -245,9 +293,10 @@ class Access:
         
         try:
         
-            data = s.recv(1024)
+            data, address = s.recvfrom(1024)
             
-            lines = self.interpret(data)
+            lines = ["From: %s:%i" % address]
+            lines = lines + self.interpret(data)
         
         except socket.error:
         
@@ -255,9 +304,11 @@ class Access:
         
         return lines
     
-    def read_port(self, ports):
+    def read_port(self, ports = [32770, 32771, 49171]):
     
         t0 = time.time()
+        
+        log = []
         
         try:
         
@@ -271,17 +322,19 @@ class Access:
                     
                     if lines != []:
                     
-                        print "Port %i:" % port
-                        
                         for line in lines:
                         
                             print line
+                            log.append(line)
                         
                         print
+                        log.append("")
         
         except KeyboardInterrupt:
         
             pass
+        
+        return log
     
     def _send_list(self, l, s, to_addr):
     
@@ -293,6 +346,284 @@ class Access:
         
         s.sendto(self._encode(l), to_addr)
     
+    def read_poll_socket(self):
+    
+        if not self.ports.has_key(32770):
+        
+            print "No socket to use for port %i" % 32770
+            return
+        
+        s = self.ports[32770]
+        
+        try:
+        
+            data, address = s.recvfrom(1024)
+        
+        except socket.error:
+        
+            if sys.exc_info()[1].args[0] == 11:
+            
+                pass
+            
+            return None
+        
+        print "From: %s:%i" % address
+        
+        # Check the first word of the response to determine what the
+        # information is about.
+        about = self.str2num(4, data[:4]) 
+        
+        major = (about & 0xffff0000) >> 16
+        minor = about & 0xffff
+        
+        # The second word of the response has an unknown meaning.
+        
+        if self.str2num(4, data[4:8]) != 0:
+        
+            # The third word contains two half-word length values.
+            length1 = self.str2num(2, data[8:10])
+            length2 = self.str2num(2, data[10:12])
+        
+        if major == 0x0001:
+        
+            # A share
+            
+            if minor == 0x0001:
+            
+                # Startup
+                print "Starting up shares"
+            
+            elif minor == 0x0002:
+            
+                # Share made available
+                
+                # A string follows the leading three words.
+                share_name = data[12:12+length1]
+                
+                c = 12 + length1
+                
+                # The protected flag follows the last byte in the string.
+                protected = self.str2num(length2, data[c:c+length2])
+                
+                if protected not in [0, 1]: protected = 0
+                
+                print 'Share "%s" (%s) available' % \
+                    (share_name, ["unprotected", "protected"][protected])
+            
+            elif minor == 0x0003:
+            
+                # Share withdrawn
+                
+                # A string follows the leading three words.
+                share_name = data[12:12+length1]
+                
+                c = 12 + length1
+                
+                # The protected flag follows the last byte in the string.
+                protected = self.str2num(length2, data[c:c+length2])
+                
+                if protected not in [0, 1]: protected = 0
+                
+                print 'Share "%s" (%s) withdrawn' % \
+                    (share_name, ["unprotected", "protected"][protected])
+            
+            elif minor == 0x0004:
+            
+                # Share periodic broadcast
+                
+                # A string follows the leading three words.
+                share_name = data[12:12+length1]
+                
+                c = 12 + length1
+                
+                # The protected flag follows the last byte in the string.
+                protected = self.str2num(length2, data[c:c+length2])
+                
+                if protected not in [0, 1]: protected = 0
+                
+                print 'Share "%s" (%s)' % \
+                    (share_name, ["unprotected", "protected"][protected])
+            
+            else:
+            
+                lines = self.interpret(data)
+                
+                for line in lines:
+                
+                    print line
+        
+        elif major == 0x0002:
+        
+            # A remote printer
+            
+            if minor == 0x0002:
+            
+                # Printer made available
+                
+                # A string follows the leading three words.
+                printer_name = data[12:12+length1]
+                
+                c = 12 + length1
+                
+                printer_desc = data[c:c+length2]
+                
+                c = c + length2
+                
+                print 'Printer "%s" (%s) available' % \
+                    (printer_name, printer_desc)
+            
+            elif minor == 0x0003:
+            
+                # Printer withdrawn
+                
+                # A string follows the leading three words.
+                printer_name = data[12:12+length1]
+                
+                c = 12 + length1
+                
+                printer_desc = data[c:c+length2]
+                
+                c = c + length2
+                
+                print 'Printer "%s" (%s) withdrawn' % \
+                    (printer_name, printer_desc)
+            
+            elif minor == 0x0004:
+            
+                # Printer periodic broadcast
+                
+                # A string follows the leading three words.
+                printer_name = data[12:12+length1]
+                
+                c = 12 + length1
+                
+                printer_desc = data[c:c+length2]
+                
+                c = c + length2
+                
+                print 'Printer "%s" (%s)' % \
+                    (printer_name, printer_desc)
+            
+            else:
+            
+                lines = self.interpret(data)
+                
+                for line in lines:
+                
+                    print line
+        
+        elif major == 0x0005:
+        
+            # A client
+            
+            if minor == 0x0001:
+            
+                # Startup
+                print "Starting up client"
+            
+            elif minor == 0x0002:
+            
+                # Startup broadcast
+                
+                # A string follows the leading three words.
+                client_name = data[12:12+length1]
+                
+                c = 12 + length1
+                
+                # The string following the client name contains some
+                # information about the client.
+                info = data[c:c+length2]
+                
+                print "Startup client: %s %s" % (client_name, info)
+            
+            elif minor == 0x0003:
+            
+                # Query message (direct)
+                
+                # A string follows the leading three words.
+                client_name = data[12:12+length1]
+                
+                c = 12 + length1
+                
+                # The string following the client name contains some
+                # information about the client.
+                info = data[c:c+length2]
+                
+                print "Query: %s %s" % (client_name, info)
+            
+            elif minor == 0x0004:
+            
+                # Availability broadcast
+                
+                # A string follows the leading three words.
+                client_name = data[12:12+length1]
+                
+                c = 12 + length1
+                
+                # The string following the client name contains some
+                # information about the client.
+                info = data[c:c+length2]
+                
+                print "Client available: %s %s" % (client_name, info)
+            
+            else:
+            
+                lines = self.interpret(data)
+                
+                for line in lines:
+                
+                    print line
+        else:
+        
+            lines = self.interpret(data)
+            
+            for line in lines:
+            
+                print line
+    
+    def read_share_socket(self):
+    
+        if not self.ports.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return
+        
+        s = self.ports[49171]
+        
+        try:
+        
+            data, address = s.recvfrom(1024)
+        
+        except socket.error:
+        
+            if sys.exc_info()[1].args[0] == 11:
+            
+                pass
+            
+            return None
+        
+        print "From: %s:%i" % address
+        
+        if data[0] == "A":
+        
+            # Attempt to open the directory.
+            print 'Request to open "%s"' % data[12:]
+        
+        elif data[0] == "R":
+        
+            # Successful reply to an open request.
+            self.share_messages.append(data)
+        
+        elif data[0] == "E":
+        
+            # Error response to a request.
+            self.share_messages.append(data)
+        
+        else:
+        
+            print self.interpret(data)
+            print
+        
     def broadcast_startup(self):
     
         """broadcast_startup(self)
@@ -300,12 +631,12 @@ class Access:
         Broadcast startup/availability messages on port 32770.
         """
         
-        if not self.ports.has_key(32770):
+        if not self.broadcasters.has_key(32770):
         
             print "No socket to use for port %i" % 32770
             return
         
-        s = self.ports[32770]
+        s = self.broadcasters[32770]
         
         # Create the first message to send.
         data = [0x00010001, 0x00000000]
@@ -320,8 +651,9 @@ class Access:
         # Create the host broadcast string.
         data = \
         [
-            0x00050002, 0x00010000, 0x00040000 | len(self.hostname),
-            self.hostname, self.identity
+            0x00050002, 0x00010000,
+            (len(self.identity) << 16) | len(self.hostname),
+            self.hostname + self.identity
         ]
         
         self._send_list(data, s, (self.broadcast, 32770))
@@ -333,18 +665,19 @@ class Access:
         Broadcast a poll on port 32770 every few seconds. Never exits.
         """
         
-        if not self.ports.has_key(32770):
+        if not self.broadcasters.has_key(32770):
         
             print "No socket to use for port %i" % 32770
             return
         
-        s = self.ports[32770]
+        s = self.broadcasters[32770]
         
         # Create a string to send.
         data = \
         [
-            0x00050004, 0x00010000, 0x00040000 | len(self.hostname),
-            self.hostname, self.identity
+            0x00050004, 0x00010000,
+            (len(self.identity) << 16) | len(self.hostname),
+            self.hostname + self.identity
         ]
         
         while 1:
@@ -356,207 +689,26 @@ class Access:
             while int(time.time() - t0) < delay:
             
                 # Read any response.
-                response = self.read_poll_socket(s)
+                response = self.read_poll_socket()
+                response = self.read_share_socket()
                 
                 if event.isSet(): return
-            
-    def read_poll_socket(self, s):
     
-        try:
-        
-            data = s.recv(1024)
-        
-        except socket.error:
-        
-            if sys.exc_info()[1].args[0] == 11:
-            
-                pass
-            
-            return None
-        
-        # Check the first word of the response to determine what the
-        # information is about.
-        about = self.str2num(4, data[:4]) 
-        
-        if about & 0xffff0000 == 0x00010000:
-        
-            # A share
-            
-            if about & 0xffff == 0x0000:
-            
-                # Startup
-                print "Starting up shares"
-            
-            elif about & 0xffff == 0x0002:
-            
-                # Share made available
-                
-                # Ignore the second word
-                
-                # The first byte of the third word contains the length of
-                # the share name string.
-                
-                length = self.str2num(1, data[8])
-                
-                # The string follows in the next word.
-                share_name = data[12:12+length]
-                
-                # The protected flag follows the last byte in the string.
-                protected = self.str2num(1, data[12+length])
-                
-                print 'Share "%s" (%s) available' % \
-                    (share_name, ["unprotected", "protected"][protected])
-            
-            elif about & 0xffff == 0x0003:
-            
-                # Share withdrawn
-                
-                # Ignore the second word
-                
-                # The first byte of the third word contains the length of
-                # the share name string.
-                
-                length = self.str2num(1, data[8])
-                
-                # The string follows in the next word.
-                share_name = data[12:12+length]
-                
-                # The protected flag follows the last byte in the string.
-                protected = self.str2num(1, data[12+length])
-                
-                print 'Share "%s" (%s) withdrawn' % \
-                    (share_name, ["unprotected", "protected"][protected])
-            
-            elif about & 0xffff == 0x0004:
-            
-                # Share periodic broadcast
-                
-                # Ignore the second word
-                
-                # The first byte of the third word contains the length of
-                # the share name string.
-                
-                length = self.str2num(1, data[8])
-                
-                # The string follows in the next word.
-                share_name = data[12:12+length]
-                
-                # The protected flag follows the last byte in the string.
-                protected = self.str2num(1, data[12+length])
-                
-                print 'Share "%s" (%s) available' % \
-                    (share_name, ["unprotected", "protected"][protected])
-        
-        elif about & 0xffff0000 == 0x00050000:
-        
-            # A client
-            
-            if about & 0xffff == 0x0001:
-            
-                # Startup
-                print "Starting up client"
-            
-            elif about & 0xffff == 0x0002:
-            
-                # Startup broadcast
-                
-                # Ignore the second word
-                
-                # The first byte of the third word contains the length of
-                # the share name string.
-                
-                length = self.str2num(1, data[8])
-                
-                # The string follows in the next word.
-                client_name = data[12:12+length]
-                
-                c = 12 + length
-                
-                if c % 4 != 0:
-                
-                    c = c + 4 - (c % 4)
-                
-                # The word following the client name contains some
-                # information about the client.
-                info = self.str2num(4, data[c:c+4])
-                
-                print "Startup client: %s %08x" % (client_name, info)
-            
-            elif about & 0xffff == 0x0003:
-            
-                # Query message (direct)
-                
-                # Ignore the second word
-                
-                # The first byte of the third word contains the length of
-                # the share name string.
-                
-                length = self.str2num(1, data[8])
-                
-                # The string follows in the next word.
-                client_name = data[12:12+length]
-                
-                c = 12 + length
-                
-                if c % 4 != 0:
-                
-                    c = c + 4 - (c % 4)
-                
-                # The word following the client name contains some
-                # information about the client.
-                info = self.str2num(4, data[c:c+4])
-                
-                print "Query: %s %08x" % (client_name, info)
-            
-            elif about & 0xffff == 0x0004:
-            
-                # Availability broadcast
-                
-                # Ignore the second word
-                
-                # The first byte of the third word contains the length of
-                # the share name string.
-                
-                length = self.str2num(1, data[8])
-                
-                # The string follows in the next word.
-                client_name = data[12:12+length]
-                
-                c = 12 + length
-                
-                if c % 4 != 0:
-                
-                    c = c + 4 - (c % 4)
-                
-                # The word following the client name contains some
-                # information about the client.
-                info = self.str2num(4, data[c:c+4])
-                
-                print "Client available: %s %08x" % (client_name, info)
+    def broadcast_share(self, name, event, protected = 0, delay = 10):
     
-    
-    def broadcast_share(self, name, event, protected = 0, delay = 2):
-    
-        """broadcast_share(self, name, event, protected = 0, delay = 2)
+        """broadcast_share(self, name, event, protected = 0, delay = 10)
         
         Broadcast the availability of a share every few seconds.
         """
         
-        # Pad the name of the share to fit an integer number of words.
-        padding = 4 - (len(name) % 4)
-        
-        if padding == 4: padding = 0
-        
-        pad_name = name + (padding * "\000")
-        
         # Broadcast the availability of the share on the polling socket.
         
-        if not self.ports.has_key(32770):
+        if not self.broadcasters.has_key(32770):
         
             print "No socket to use for port %i" % 32770
             return
         
-        s = self.ports[32770]
+        s = self.broadcasters[32770]
         
         data = \
         [
@@ -568,12 +720,12 @@ class Access:
         
         # Advertise the share on the share socket.
         
-        if not self.ports.has_key(49171):
+        if not self.broadcasters.has_key(49171):
         
             print "No socket to use for port %i" % 49171
             return
         
-        s = self.ports[49171]
+        s = self.broadcasters[49171]
         
         # Create a string to send.
         data = [0x00000046, 0x00000013, 0x00000000]
@@ -586,25 +738,76 @@ class Access:
             
             while int(time.time() - t0) < delay:
             
-                try:
-                
-                    data = s.recv(1024)
-                    
-                    sys.stdout.write("Sharing data:\n")
-                    self.interpret(data)
-                    sys.stdout.flush()
-                
-                except socket.error:
-                
-                    if sys.exc_info()[1].args[0] == 11:
-                    
-                        pass
+                # Read any response.
+                #response = self.read_share_socket()
                 
                 if event.isSet(): return
         
         # Broadcast that the share has now been removed.
         
-        s = self.ports[32770]
+        s = self.broadcasters[32770]
+        
+        data = \
+        [
+            0x00010003, 0x00010000, 0x00010000 | len(name),
+            name + chr(protected & 1)
+        ]
+    
+    def broadcast_printer(self, name, description, event,
+                          protected = 0, delay = 2):
+    
+        """broadcast_share(self, name, description, event,
+                           protected = 0, delay = 2)
+        
+        Broadcast the availability of a printer every few seconds.
+        """
+        
+        # Broadcast the availability of the printer on the polling socket.
+        
+        if not self.broadcasters.has_key(32770):
+        
+            print "No socket to use for port %i" % 32770
+            return
+        
+        s = self.broadcasters[32770]
+        
+        data = \
+        [
+            0x00020002, 0x00010000,
+            (len(description) << 16) | len(name),
+            name + description
+        ]
+        
+        self._send_list(data, s, (self.broadcast, 32770))
+        
+        # Advertise the share on the share socket.
+        
+        if not self.broadcasters.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return
+        
+        s = self.broadcasters[49171]
+        
+        # Create a string to send.
+        data = [0x00000046, 0x00000013, 0x00000000]
+        
+        while 1:
+        
+            t0 = time.time()
+            
+            self._send_list(data, s, (self.broadcast, 49171))
+            
+            while int(time.time() - t0) < delay:
+            
+                # Read any response.
+                #response = self.read_share_socket(s)
+                
+                if event.isSet(): return
+        
+        # Broadcast that the share has now been removed.
+        
+        s = self.broadcasters[32770]
         
         data = \
         [
@@ -614,23 +817,60 @@ class Access:
     
     def send_query(self, host):
     
-        if not self.ports.has_key(32770):
+        if not self.broadcasters.has_key(32770):
         
             print "No socket to use for port %i" % 32770
             return
         
-        s = self.ports[32770]
+        s = self.broadcasters[32770]
         
         # Create a string to send.
         data = \
         [
-            0x00050003, 0x00010000, 0x00040000 | len(self.hostname),
-            self.hostname, self.identity
+            0x00050003, 0x00010000,
+            (len(self.identity) << 16) | len(self.hostname),
+            self.hostname + self.identity
         ]
         
         self._send_list(data, s, (host, 32770))
         
         self.read_port([32770, 32771, 49171])
+    
+    def open_share(self, name, host):
+    
+        # Use the non-broadcast socket.
+        if not self.ports.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return
+        
+        s = self.ports[49171]
+        
+        # Create a string to send. The three bytes following the "A"
+        # character are used to identify the response from the other
+        # client (it passes them back).
+        new_id = self.new_id()
+        
+        data = ["A"+new_id, 1, 0, name]
+        
+        self._send_list(data, s, (host, 49171))
+        
+        while 1:
+        
+            # See if the response has arrived.
+            for data in self.share_messages:
+            
+                if data[:4] == "R"+new_id:
+                
+                    print 'Successfully opened "%s"' % name
+                    self.share_messages.remove(data)
+                    return new_id
+                
+                elif data[:4] == "E"+new_id:
+                
+                    print 'Error: "%s"' % data[8:]
+                    self.share_messages.remove(data)
+                    return None
 
 
 
@@ -652,10 +892,12 @@ class Server:
             kwargs = {"delay": 10}
             )
         
-        # Maintain a dictionary of open shares and a dictionary of events
-        # to use to communicate with them.
+        # Maintain a dictionary of open shares and printers, and keep a
+        # dictionary of events to use to communicate with them.
         self.shares = {}
-        self.events = {}
+        self.printers = {}
+        self.share_events = {}
+        self.printer_events = {}
     
     def __del__(self):
     
@@ -699,7 +941,7 @@ class Server:
         for name, thread in self.shares.items():
         
             print "Terminating thread for share: %s" % name
-            self.events[name].set()
+            self.share_events[name].set()
             
             # Wait until the thread terminates.
             while self.shares[name].isAlive():
@@ -723,14 +965,14 @@ class Server:
         
         if self.shares.has_key(name):
         
-            print "Share is already accessible: %s" % name
+            print "Share is already available: %s" % name
             return
         
         # Create an event to use to inform the share that it must be
         # removed.
         event = threading.Event()
         
-        self.events[name] = event
+        self.share_events[name] = event
         
         # Create a thread to run the share broadcast loop.
         thread = threading.Thread(
@@ -753,11 +995,11 @@ class Server:
         
         if not self.shares.has_key(name):
         
-            print "Share is not currently accessible: %s" % name
+            print "Share is not currently available: %s" % name
             return
         
         # Set the relevant event object's flag.
-        self.events[name].set()
+        self.share_events[name].set()
         
         # Wait until the thread terminates.
         while self.shares[name].isAlive():
@@ -766,8 +1008,64 @@ class Server:
         
         # Remove the thread and the event from their respective dictionaries.
         del self.shares[name]
-        del self.events[name]
+        del self.share_events[name]
     
-    def read_port(self, ports):
+    def add_printer(self, name):
     
-        self.access.read_port(ports)
+        """add_printer(self, name)
+        
+        Make the named printer available to other hosts.
+        """
+        
+        if self.printers.has_key(name):
+        
+            print "Printer is already available: %s" % name
+            return
+        
+        # Create an event to use to inform the share that it must be
+        # removed.
+        event = threading.Event()
+        
+        self.printer_events[name] = event
+        
+        # Create a thread to run the share broadcast loop.
+        thread = threading.Thread(
+            group = None, target = self.access.broadcast_printer,
+            name = 'Printer "%s"' % name, args = (name, event),
+            kwargs = {"protected": protected, "delay": delay}
+            )
+        
+        self.printers[name] = thread
+        
+        # Start the thread.
+        thread.start()
+    
+    def remove_printer(self, name):
+    
+        """remove_printer(self, name)
+        
+        Withdraw the named printer from service.
+        """
+        
+        if not self.printers.has_key(name):
+        
+            print "Printer is not currently available: %s" % name
+            return
+        
+        # Set the relevant event object's flag.
+        self.printer_events[name].set()
+        
+        # Wait until the thread terminates.
+        while self.printers[name].isAlive():
+        
+            pass
+        
+        # Remove the thread and the event from their respective dictionaries.
+        del self.printers[name]
+        del self.printer_events[name]
+    
+    def read_port(self, ports = [32770, 32771, 49171]):
+    
+        log = self.access.read_port(ports)
+        
+        return log
