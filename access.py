@@ -27,6 +27,16 @@ DEALINGS IN THE SOFTWARE.
 
 import glob, os, string, socket, sys, threading, time, types
 
+if not os.__dict__.has_key("extsep"):
+
+    if sys.platform != "riscos":
+    
+        os.extsep = "."
+    
+    else:
+    
+        os.extsep = "/"
+
 
 DEFAULT_FILETYPE = 0xffd
 DEFAULT_SUFFIX = os.extsep + "txt"
@@ -315,12 +325,13 @@ class Common:
     
     def _make_riscos_filetype_date(self, filetype, cs):
     
-        filetype_word = \
+        filetype_word = int(
             0xfff00000 | (filetype << 8) | \
-            ((cs & 0xff00000000) >> 32)
+            (long(cs & 0xff00000000L) >> 32)
+            )
         
         # Date word
-        date_word = cs & 0xffffffff
+        date_word = int(cs & 0xffffffff)
         
         return filetype_word, date_word
     
@@ -2370,9 +2381,10 @@ class Share(Ports, Translate):
                 # Convert this to the RISC OS date format.
                 cs = self.to_riscos_time(seconds = seconds)
                 
-                filetype_word = \
+                filetype_word = int(
                     0xfff00000 | (filetype << 8) | \
-                    ((cs & 0xff00000000) >> 32)
+                    ((cs & 0xff00000000L) >> 32)
+                    )
                 
                 file_info.append(filetype_word)
                 
