@@ -853,10 +853,12 @@ class Peer(Common):
         self.clients = {}
         self.shares = {}
         self.printers = {}
+        self.transfers = {}
         
         # Keep a dictionary of events to use to communicate with threads.
         self.share_events = {}
         self.printer_events = {}
+        self.transfer_events = {}
         
         # Create lists of messages sent to each listening socket.
         self.share_messages = []
@@ -1254,6 +1256,65 @@ class Peer(Common):
         self._send_list(data, s, (host, 32770))
         
         self.read_port([32770, 32771, 49171])
+    
+    # Method used in thread for transferring files
+    
+    def transfer_file(self, event, reply_id, length, host, path):
+    
+        # This method should only get called once by the thread it belongs
+        # to, then the thread should terminate.
+        
+        # Wait for a response.
+        pos = 0
+        
+        try:
+        
+            f = open(path, "wb")
+            
+            while pos < length:
+            
+                # Construct a list to send to the remote client.
+                msg = ["w", 0, pos, min(RECV_SIZE, length - pos)]
+                
+                self.log("comment", repr(msg), "")
+                
+                # Send the request.
+                replied, data = self._send_request(
+                    msg, host, ["d"], new_id = reply_id
+                    )
+                
+                if replied != 1:
+                
+                    return
+                
+                # Read the header.
+                new_pos = self.str2num(4, data[4:8])
+                f.write(data[8:])
+                
+                pos = pos + len(data) - 8
+                
+                # Check the event flag.
+                if event.isSet():
+                
+                    f.close()
+                    return
+            
+            # Close the file.
+            f.close()
+        
+        except IOError:
+        
+            return
+        
+        # End the transaction by sending a final request for data.
+        msg = ["w", 0, pos, 0]
+        
+        # Send the request.
+        replied, data = self._send_request(msg, host, ["d"])
+        
+        if replied != 1:
+        
+            return
     
     def read_poll_socket(self):
     
@@ -1665,18 +1726,19 @@ class Peer(Common):
         #
         #print
         
+        self.log("received", data, address)
+        
         command = data[0]
         reply_id = data[1:4]
         
         if len(data) > 4:
         
-            code = self.str2num(4, data[4:8])
+            field_max = min(8, len(data))
+            code = self.str2num(field_max - 4, data[4:field_max])
         
         else:
         
             code = None
-        
-        self.log("received", data, address)
         
         msg = None
         
@@ -1992,12 +2054,38 @@ class Peer(Common):
             
             # The remote client has passed the handle, some word
             # and the length of the file.
-            length = self.str2num(4, data[16:20])
+            handle = self.str2num(4, data[8:12])
+            new_length = self.str2num(4, data[16:20])
             
-            # Reply with an short message.
-            msg = ["R"+reply_id, 0, 0]
+            # Translate the handle into a path.
+            path, length = self.handles[handle]
             
-            self._send_list(msg, _socket, address)
+            # Extract the host name from the address as it is assumed that
+            # communication will be through port 49171.
+            host = address[0]
+            
+            # Start a new thread to request and handle the incoming data.
+            
+            # Create an event to use to inform the thread that it terminate.
+            event = threading.Event()
+            
+            # Record the event in the transfer events dictionary.
+            self.transfer_events[(path, host)] = event
+            
+            # Create a thread to run the share broadcast loop.
+            thread = threading.Thread(
+                group = None, target = self.transfer_file,
+                name = 'Transfer "%s" from %s:%i' % (
+                    path, address[0], address[1]
+                    ),
+                args = (event, reply_id, new_length, host, path)
+                )
+            
+            # Record the thread in the transfers dictionary.
+            self.transfers[(path, host)] = thread
+            
+            # Start the thread.
+            thread.start()
             
             # Also notify the other client that the share has been updated.
             
@@ -2379,6 +2467,16 @@ class Peer(Common):
             # Resource updated
             pass
         
+        elif command == "d":
+        
+            # Data sent to this client for uploading.
+            self.share_messages.append(data)
+        
+        elif command == "w":
+        
+            # Request for data to be sent to a remote client for uploading.
+            self.share_messages.append(data)
+        
         else:
         
             self.log("received", data, address)
@@ -2386,6 +2484,9 @@ class Peer(Common):
         if msg is not None and type(msg) != types.StringType:
         
             self.log("sent", msg, address)
+    
+    
+    # Method used in listening thread
     
     def listen(self, event):
     
@@ -2455,6 +2556,28 @@ class Peer(Common):
             pass
         
         # Terminate all threads.
+        
+        # Threads for file transfers to this host
+        
+        for (path, host), thread in self.transfers.items():
+        
+            # Only terminate threads for shares on this host.
+            if host == self.hostaddr:
+            
+                print "Terminating thread for transfer from %s to %s" % \
+                    (host, path)
+                
+                # We may wish to avoid doing this to prevent incomplete
+                # transfers; we could wait until they have all finished.
+                self.transfer_events[(path, host)].set()
+                
+                # Wait until the thread terminates.
+                while thread.isAlive():
+                
+                    pass
+        
+        # Threads for share broadcasts
+        
         for (name, host), (thread, directory, date, mode) in \
             self.shares.items():
         
@@ -2462,7 +2585,7 @@ class Peer(Common):
             if host == self.hostaddr:
             
                 print "Terminating thread for share: %s" % name
-                self.share_events[name].set()
+                self.share_events[(name, host)].set()
                 
                 # Wait until the thread terminates.
                 while thread.isAlive():
@@ -2553,7 +2676,7 @@ class Peer(Common):
         # removed.
         event = threading.Event()
         
-        self.share_events[name] = event
+        self.share_events[(name, self.hostaddr)] = event
         
         # Create a thread to run the share broadcast loop.
         thread = threading.Thread(
@@ -2583,7 +2706,7 @@ class Peer(Common):
             return
         
         # Set the relevant event object's flag.
-        self.share_events[name].set()
+        self.share_events[(name, self.hostaddr)].set()
         
         thread, directory, date, mode = self.shares[(name, self.hostaddr)]
         
@@ -2594,7 +2717,7 @@ class Peer(Common):
         
         # Remove the thread and the event from their respective dictionaries.
         del self.shares[(name, self.hostaddr)]
-        del self.share_events[name]
+        del self.share_events[(name, self.hostaddr)]
     
     def add_printer(self, name):
     
@@ -2677,7 +2800,7 @@ class Peer(Common):
         return 0, (0, "The machine containing the shared disc does not respond")
     
     def _expect_reply(self, _socket, data, host, new_id, commands,
-                     tries = 5, delay = 2):
+                      tries = 5, delay = 2):
     
         replied = 0
         
@@ -2708,7 +2831,7 @@ class Peer(Common):
         # Return a negative result.
         return 0, (0, "The machine containing the shared disc does not respond")
     
-    def _send_request(self, msg, host, commands):
+    def _send_request(self, msg, host, commands, new_id = None):
     
         """replied, data = _send_reqest(self, msg)
         
@@ -2723,8 +2846,10 @@ class Peer(Common):
         
         s = self.ports[49171]
         
-        # Use a new ID for this message.
-        new_id = self.new_id()
+        if new_id is None:
+        
+            # Use a new ID for this message.
+            new_id = self.new_id()
         
         # Create the command to send. The three bytes following the
         # command character are used to identify the response from the
@@ -3008,6 +3133,14 @@ class Peer(Common):
     
     def put(self, path, name, host):
     
+        # Use the non-broadcast socket.
+        if not self.ports.has_key(49171):
+        
+            print "No socket to use for port %i" % 49171
+            return 0, []
+        
+        s = self.ports[49171]
+        
         try:
         
             # Determine the file's relevant filetype and
@@ -3065,13 +3198,10 @@ class Peer(Common):
             return
         
         # Send the new length of the file.
-        # If we specify the final word (length word) as zero then this
-        # appears to work. This may be because the remote file has been
-        # created with zero length.
-        msg = ["A", 0xc, info["handle"], 0, 0] # length]
+        msg = ["A", 0xc, info["handle"], 0, length]
         
         # Send the request.
-        replied, data = self._send_request(msg, host, ["R"])
+        replied, data = self._send_request(msg, host, ["w"])
         
         if replied != 1:
         
@@ -3082,8 +3212,74 @@ class Peer(Common):
             return
         
         # A reply containing two words was returned. Presumably, the
-        # second is the length of the file created on the remote machine.
-        #length = self.str2num(4, data[8:12])
+        # second is the length of the data to be sent and the first is
+        # the position in the file of the data requested (like the
+        # get method's "B" ... 0xb message.
+        reply_id = data[1:4]
+        pos = self.str2num(4, data[8:12])
+        amount = min(SEND_SIZE, self.str2num(4, data[12:16]))
+        
+        print pos, amount
+        
+        try:
+        
+            f = open(path, "rb")
+            
+            pos = 0
+            
+            while pos < length:
+            
+                f.seek(pos, 0)
+                
+                # Send a message with the amount of data specified.
+                msg = ["d"+reply_id, pos + amount]
+                self.log("sent", msg, (host, 49171))
+                
+                # Don't pad the data sent.
+                msg = self._encode(msg) + f.read(amount)
+                
+                # Send the request.
+                self._send_list(msg, s, (host, 49171))
+                
+                # Wait for messages to arrive with the same ID as
+                # the one used to specify the file to be uploaded.
+                replied, data = self._expect_reply(
+                    s, msg, host, reply_id, ["w"]
+                    )
+                
+                if replied != 1:
+                
+                    # Tidy up.
+                    self._close(info["handle"], host)
+                    
+                    self.delete(ros_path, host)
+                    
+                    f.close()
+                    
+                    print "Uploading was terminated."
+                    return
+                
+                pos = self.str2num(4, data[4:8])
+                reply_id = data[1:4]
+                
+                sys.stdout.write(
+                    "\rWritten %i/%i bytes of file %s" % (
+                        pos, length, ros_path
+                        )
+                    )
+                sys.stdout.flush()
+            
+            # When all the data has been sent, send an empty "d" message.
+        
+        except IOError:
+        
+            # Tidy up.
+            self._close(info["handle"], host)
+            
+            self.delete(ros_path, host)
+            
+            print "Uploading was terminated."
+            return
         
         # Set the filetype and date stamp.
         msg = [ "A", 0x10, info["handle"], filetype_word, date_word ]
