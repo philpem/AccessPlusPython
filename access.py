@@ -4,7 +4,7 @@
     Tools for examining data send via UDP from an Access+ station.
 """
 
-import os, string, socket, sys, time, threading, types
+import glob, os, string, socket, sys, time, threading, types
 
 
 default_filetype = 0xffd
@@ -350,17 +350,27 @@ class Common:
                 try:
                 
                     return string.atoi(mapping["Hex"], 16), \
-                        self.riscos_filename(filename[:at])
+                        self.riscos_filename(filename)[:at]
                    
                 except ValueError:
                 
                     # The value found was not in a valid hexadecimal
                     # representation. Return the default filetype.
                     return default_filetype, \
-                        self.riscos_filename(filename[:at])
+                        self.riscos_filename(filename)
         
         # No mappings declared the suffix used.
-        return default_filetype, self.riscos_filename(filename[:at])
+        return default_filetype, self.riscos_filename(filename)
+    
+    def construct_directory_name(self, elements):
+    
+        built = ""
+        
+        for element in elements:
+        
+            built = os.path.join(built, element)
+        
+        return built
 
 
 
@@ -929,8 +939,6 @@ class Peer(Common):
     
     def _read_poll_socket(self, data, address):
     
-        print "From: %s:%i" % address
-        
         host = address[0]
         
         # Check the first word of the response to determine what the
@@ -958,7 +966,8 @@ class Peer(Common):
             if minor == 0x0001:
             
                 # Startup
-                print "Starting up shares"
+                #print "Starting up shares"
+                pass
             
             elif minor == 0x0002:
             
@@ -976,8 +985,8 @@ class Peer(Common):
                     
                     if protected not in [0, 1]: protected = 0
                     
-                    print 'Share "%s" (%s) available' % \
-                        (share_name, ["unprotected", "protected"][protected])
+                    #print 'Share "%s" (%s) available' % \
+                    #    (share_name, ["unprotected", "protected"][protected])
                     
                     # Compare the share with those recorded.
                     
@@ -1006,8 +1015,8 @@ class Peer(Common):
                 
                 if protected not in [0, 1]: protected = 0
                 
-                print 'Share "%s" (%s) withdrawn' % \
-                    (share_name, ["unprotected", "protected"][protected])
+                #print 'Share "%s" (%s) withdrawn' % \
+                #    (share_name, ["unprotected", "protected"][protected])
                 
                 # Compare the share with those recorded.
                 
@@ -1031,8 +1040,8 @@ class Peer(Common):
                 
                 if protected not in [0, 1]: protected = 0
                 
-                print 'Share "%s" (%s)' % \
-                    (share_name, ["unprotected", "protected"][protected])
+                #print 'Share "%s" (%s)' % \
+                #    (share_name, ["unprotected", "protected"][protected])
                 
                 # Compare the share with those recorded.
                 
@@ -1043,6 +1052,8 @@ class Peer(Common):
             
             else:
             
+                print "From: %s:%i" % address
+                
                 lines = self.interpret(data)
                 
                 for line in lines:
@@ -1120,6 +1131,8 @@ class Peer(Common):
             
             else:
             
+                print "From: %s:%i" % address
+                
                 lines = self.interpret(data)
                 
                 for line in lines:
@@ -1135,7 +1148,8 @@ class Peer(Common):
             if minor == 0x0001:
             
                 # Startup
-                print "Starting up client"
+                #print "Starting up client"
+                pass
             
             elif minor == 0x0002:
             
@@ -1150,7 +1164,7 @@ class Peer(Common):
                 # information about the client.
                 info = data[c:c+length2]
                 
-                print "Startup client: %s %s" % (client_name, info)
+                #print "Startup client: %s %s" % (client_name, info)
             
             elif minor == 0x0003:
             
@@ -1180,7 +1194,7 @@ class Peer(Common):
                 # information about the client.
                 info = data[c:c+length2]
                 
-                print "Client available: %s %s" % (client_name, info)
+                #print "Client available: %s %s" % (client_name, info)
                 
                 # Compare the client with those in the clients dictionary.
                 
@@ -1191,6 +1205,8 @@ class Peer(Common):
             
             else:
             
+                print "From: %s:%i" % address
+                
                 lines = self.interpret(data)
                 
                 for line in lines:
@@ -1198,6 +1214,8 @@ class Peer(Common):
                     print line
         else:
         
+            print "From: %s:%i" % address
+            
             lines = self.interpret(data)
             
             for line in lines:
@@ -1280,44 +1298,72 @@ class Peer(Common):
     
     def _read_share_socket(self, _socket, data, address):
     
-        print "From: %s:%i" % address
-        
-        lines = self.interpret(data)
-        
-        for line in lines:
-        
-            print line
-        
-        print
-        
         host = address[0]
         
         if data[0] == "A":
         
-            # Attempt to open the directory.
-            share_name = self.read_string(
+            # Attempt to open a share, directory or path.
+            path = self.read_string(
                 data[12:], ending = "\000", include = 0
                 )
+            
+            # Split the path up into elements.
+            path_elements = string.split(path, ".")
+            
+            # The first element is the share name.
+            share_name = path_elements[0]
             
             print 'Request to open "%s"' % share_name
             
             if self.shares.has_key((share_name, self.hostaddr)):
             
-                # For unprotected shares, reply with details of the share.
+                if len(path_elements) == 1:
                 
-                # Use the first word given but substitute "R" for "A".
-                msg = ["R"+data[1:4], 0xffffcd00, 0, 0x800, 0x13, 0x102, 0]
+                    # For unprotected shares, reply with details of the share.
+                    
+                    # Use the first word given but substitute "R" for "A".
+                    msg = ["R"+data[1:4], 0xffffcd00, 0, 0x800, 0x13, 0x102, 0]
+                    
+                    #print "Sent:"
+                    #for line in self.interpret(self._encode(msg)):
+                    #
+                    #    print line
+                    #print
+                    
+                    #msg = "R"+data[1:4] + '\x00\xcd\xff\xff\x00\x00\x00\x00\x00\x08\x00\x00\x13\x00\x00\x00\x02\x01\x00\x00\x01:\xa6\x04'
+                    
+                    #_socket.sendto(msg, address)
                 
-                print "Sent:"
-                for line in self.interpret(self._encode(msg)):
+                else:
                 
-                    print line
-                print
+                    # Read the directory name associated with this share.
+                    thread, directory = self.shares[(name, self.hostaddr)]
+                    
+                    # Construct a path to the object below the shared
+                    # directory.
+                    path = self.construct_directory_name(path_elements[1:])
+                    
+                    # Append this path to the shared directory's path.
+                    path = os.path.join(directory, path)
+                    
+                    # Look for files with the 
+                    
+                    # Try to find the details of the object.
+                    if os.path.isdir(path):
+                    
+                        # A directory
+                        msg = ["R"+data[1:4], 0xfffffd00, 0, 0x800, 0x10, 0]
+                    
+                    elif os.path.isfile(path):
+                    
+                        # A file
+                        filetype, filename = self.suffix_to_filetype(file)
+                        
+                        msg = [ "R"+data[1:4], 0xfff0004b | (filetype << 8),
+                                ]
                 
-                #msg = "R"+data[1:4] + '\x00\xcd\xff\xff\x00\x00\x00\x00\x00\x08\x00\x00\x13\x00\x00\x00\x02\x01\x00\x00\x01:\xa6\x04'
-                
+                # Send a reply.
                 self._send_list(msg, _socket, address)
-                #_socket.sendto(msg, address)
             
             else:
             
@@ -1535,6 +1581,23 @@ class Peer(Common):
                 self.read_string(data[8:], ending = "\000", include = 0),
                 self.str2num(4, data[4:8])
                 )
+        
+        elif data[0] == "F":
+        
+            # Resource updated
+            pass
+        
+        else:
+        
+            print "From: %s:%i" % address
+            
+            lines = self.interpret(data)
+            
+            for line in lines:
+            
+                print line
+            
+            print
     
     def listen(self, event):
     
@@ -1774,9 +1837,9 @@ class Peer(Common):
         del self.printers[(name, self.hostaddr)]
         del self.printer_events[name]
     
-    def open_share(self, name, host):
+    def info(self, name, host):
     
-        """open_share(self, name, host)
+        """info(self, name, host)
         
         Open a share of a given name on the host specified.
         """
@@ -1841,8 +1904,17 @@ class Peer(Common):
             print "The machine containing the shared disc does not respond"
             return
         
-        # Set the open share details.
-        self.open_shares[(name, host)] = None
+        # Read the information on the object.
+        filetype = (self.str2num(4, data[4:8]) & 0xfff00) >> 8
+        unknown = self.str2num(4, data[8:12])
+        length = self.str2num(4, data[12:16])
+        flags1 = self.str2num(4, data[16:20])
+        flags2 = self.str2num(4, data[20:24])
+        
+        # Return the information on the item.
+        return { "filetype": filetype, "unknown": unknown,
+                 "length": length, "flags1": flags1, "flags2": flags2,
+                 "isdir": (flags1 & 0x10) }
     
     def catalogue(self, name, host):
     
@@ -1895,7 +1967,6 @@ class Peer(Common):
                     self.data = data
                     
                     # Catalogue information was returned.
-                    self.open_shares[(name, host)] = new_id
                     replied = 1
                     
                     break
@@ -1983,5 +2054,5 @@ class Peer(Common):
         # open request but with a "B" command word like a
         # catalogue request.
         
-        # The second to last word is the root entry.
-        self.open_shares[(name, host)] = self.str2num(4, data[-8:-4])
+        # Return the catalogue information.
+        return files
