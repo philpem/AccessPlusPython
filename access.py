@@ -1583,7 +1583,7 @@ class Peer(Common):
                 
                 # Send the request.
                 replied, data = self._send_request(
-                    msg, host, ["d"], new_id = reply_id
+                    msg, host, ["d"], new_id = reply_id, tries = 20, delay = 0.5
                     )
                 
                 if replied == -1:
@@ -3290,7 +3290,8 @@ class Peer(Common):
         # Return a negative result.
         return 0, (0, "The machine containing the shared disc does not respond")
     
-    def _send_request(self, msg, host, commands, new_id = None):
+    def _send_request(self, msg, host, commands, new_id = None, tries = 5,
+                      delay = 2):
     
         """replied, data = _send_reqest(self, msg)
         
@@ -3322,7 +3323,8 @@ class Peer(Common):
         self._send_list(msg, s, (host, 49171))
         
         # Wait for a reply.
-        replied, data = self._expect_reply(s, msg, host, new_id, commands)
+        replied, data = \
+            self._expect_reply(s, msg, host, new_id, commands, tries, delay)
         
         #if replied == 1:
         #
