@@ -14,8 +14,8 @@ DEFAULT_SUFFIX = os.extsep + "txt"
 # Find the number of centiseconds between 1900 and 1970.
 between_epochs = ((365 * 70) + 17) * 24 * 360000
 
-RECV_SIZE = 32768
-SEND_SIZE = 32768
+RECV_SIZE = 16384
+SEND_SIZE = 16384
 
 
 
@@ -119,16 +119,16 @@ class Common:
     
             return new
     
-    def coerce(self, fn, args, exceptions, error_msg):
+    def coerce(self, fn, args, catch_exceptions, raise_exception, error_msg):
     
         try:
         
             return fn(*args)
         
-        except exceptions:
+        except catch_exceptions:
         
-            sys.stderr.write(error_msg)
-            raise ConfigError, "Failed to coerce %s using %s." % (args, fn)
+            sys.stderr.write(error_msg + "\n")
+            raise raise_exception, "Failed to coerce %s using %s." % (args, fn)
     
     def new_id(self):
     
@@ -459,33 +459,12 @@ class Common:
                 # Try to create this share.
                 name, path, mode, delay, present, filetype = values[0:6]
                 
-                try:
+                self.add_share(name, path, mode, delay, present, filetype)
                 
-                    mode = self.coerce(
-                        string.atoi, (mode, 8), (ValueError,),
-                        "Invalid octal value for mode mask: %s" % mode
-                        )
-                    
-                    delay = self.coerce(
-                        float, (delay,), (ValueError,),
-                        "Invalid delay value: %s" % delay
-                        )
-                    
-                    filetype = self.coerce(
-                        string.atoi, (filetype, 16), (ValueError,),
-                        "Invalid hexadecimal value for filetype: %s" % filetype
-                        )
-                    
-                    self.add_share(name, path, mode, delay)
-                
-                except ConfigError:
-                
-                    pass
-            
             elif len(values) > 0:
             
                 sys.stderr.write(
-                    "Bad or incomplete share description: %s" % line
+                    "Bad or incomplete share description: %s\n" % line
                     )
     
     def suffix_to_filetype(self, filename):
@@ -820,7 +799,7 @@ class Common:
         share_name = path_elements[0]
         
         # Read the directory name associated with this share.
-        thread, directory, date, mode = self.shares[(share_name, self.hostaddr)]
+        share = self.shares[(share_name, self.hostaddr)]
         
         # Construct a path to the object below the shared
         # directory.
@@ -829,7 +808,7 @@ class Common:
             )
         
         # Append this path to the shared directory's path.
-        path = os.path.join(directory, path)
+        path = os.path.join(share.directory, path)
         
         return path
     
@@ -928,7 +907,7 @@ class File:
     
         self.pieces.append( (self.ptr, data) )
         self.ptr = self.ptr + len(data)
-        self.length = max(self.ptr, self.length)
+        self._length = max(self.ptr, self._length)
     
     def length(self):
     
@@ -1052,6 +1031,73 @@ class Unused(Common):
 
 
 
+class ShareError(Exception):
+
+    pass
+
+class Share:
+
+    """Share
+    
+    A class encapsulating a share on a local or remote machine.
+    """
+    
+    def __init__(self, name, directory, mode, delay, present, filetype, parent,
+                 host = None):
+    
+        # Record the parent instance.
+        self.parent = parent
+        
+        # If no host is set then use the parent's hostaddr attribute.
+        self.host = host or self.parent.hostaddr
+        
+        # Determine the protected flag to broadcast by examining the
+        # other users write bit.
+        if (mode & os.path.stat.S_IWOTH) == 0:
+        
+            protected = 1
+        
+        else:
+        
+            protected = 0
+        
+        # Create an event to use to inform the share that it must be
+        # removed.
+        event = threading.Event()
+        
+        self.event = event
+        
+        # Create a thread to run the share broadcast loop.
+        thread = threading.Thread(
+            group = None, target = self.parent.broadcast_share,
+            name = 'Share "%s"' % name, args = (name, event),
+            kwargs = {"protected": protected, "delay": delay}
+            )
+        
+        # Determine the current time to use for the date of creation.
+        date = time.localtime(time.time())
+        
+        # Record the relevant information about the share.
+        
+        self.thread = thread
+        self.directory = directory
+        self.date = date
+        self.mode = mode
+        self.present = present
+        self.filetype = filetype
+        
+        # Start the thread.
+        thread.start()
+
+
+class RemoteShare(Share):
+
+    def __init__(self, host):
+    
+        self.host = host
+
+
+
 class Peer(Common):
 
     def __init__(self, debug = 1):
@@ -1132,7 +1178,6 @@ class Peer(Common):
         self.transfers = {}
         
         # Keep a dictionary of events to use to communicate with threads.
-        self.share_events = {}
         self.printer_events = {}
         self.transfer_events = {}
         
@@ -1583,7 +1628,7 @@ class Peer(Common):
                 
                 # Send the request.
                 replied, data = self._send_request(
-                    msg, host, ["d"], new_id = reply_id, tries = 20, delay = 0.5
+                    msg, host, ["d"], new_id = reply_id
                     )
                 
                 if replied == -1:
@@ -1603,13 +1648,15 @@ class Peer(Common):
                         "Data position within file: %i" % data_pos, ""
                         )
                     
-                    if len(data) > 8:
+                    if len(data) > 8 and data_pos == pos:
                     
                         file_data = data[8:]
                         
                         fh.seek(data_pos, 0)
                         
                         #self.log("comment", file_data, "")
+                        
+                        self.log("comment", "File position: %i" % data_pos, "")
                         
                         fh.write(file_data)
                         pos = data_pos + len(file_data)
@@ -1754,10 +1801,11 @@ class Peer(Common):
                     
                     if not self.shares.has_key((share_name, host)):
                     
-                        # Add the share share_name and host to the shares dictionary.
-                        self.shares[(share_name, host)] = (
-                            None, None, None, None
-                            )
+                        # Add the share share_name and host to the shares
+                        # dictionary.
+                        share = RemoteShare(host)
+                        
+                        self.shares[(share_name, host)] = share
                 
                 elif share_type == 0x00010001:
                 
@@ -1812,9 +1860,9 @@ class Peer(Common):
                 if not self.shares.has_key((share_name, host)):
                 
                     # Add the share name and host to the shares dictionary.
-                    self.shares[(share_name, host)] = (
-                        None, None, None, None
-                        )
+                    share = RemoteShare(host)
+                    
+                    self.shares[(share_name, host)] = share
             
             else:
             
@@ -2130,15 +2178,14 @@ class Peer(Common):
                         # converted from the mode value given and the object
                         # type as a standard value.
                         
-                        thread, directory, date, mode = \
-                            self.shares[(share_name, self.hostaddr)]
+                        share = self.shares[(share_name, self.hostaddr)]
                         
-                        cs = self.to_riscos_time(ttuple = date)
+                        cs = self.to_riscos_time(ttuple = share.date)
                         
                         filetype_word, date_word = \
                             self._make_riscos_filetype_date(0xfcd, cs)
                         
-                        access_attr = self.to_riscos_access(mode = mode)
+                        access_attr = self.to_riscos_access(mode = share.mode)
                         
                         msg = \
                         [
@@ -2160,8 +2207,7 @@ class Peer(Common):
                 
                     # Read the directory name associated with this share;
                     # the file mode will also be useful.
-                    thread, directory, date, mode = \
-                        self.shares[(share_name, self.hostaddr)]
+                    share = self.shares[(share_name, self.hostaddr)]
                     
                     # Construct a path to the object below the shared
                     # directory.
@@ -2171,7 +2217,7 @@ class Peer(Common):
                         )
                     
                     # Append this path to the shared directory's path.
-                    path = os.path.join(directory, path)
+                    path = os.path.join(share.directory, path)
                     
                     self.log("comment", "Original path: %s" % path, "")
                     
@@ -2189,7 +2235,7 @@ class Peer(Common):
                             # Create an object on the local filesystem.
                             path = path + DEFAULT_SUFFIX
                             open(path, "wb").write("")
-                            os.chmod(path, mode)
+                            os.chmod(path, share.mode)
                         
                         except IOError:
                         
@@ -2208,7 +2254,7 @@ class Peer(Common):
                         
                             # Create an object on the local filesystem.
                             open(new_path, "wb").write("")
-                            os.chmod(new_path, mode)
+                            os.chmod(new_path, share.mode)
                             path = new_path
                         
                         except IOError:
@@ -2372,11 +2418,11 @@ class Peer(Common):
         
             # Rename file on our machine.
             
-            self.log("received", data, address)
-            
             try:
             
                 path = self.from_riscos_path(data[16:])
+                
+                print "Rename:", path
                 
                 filetype, date, length, access_attr, object_type, \
                     handle = self.read_path_info(path)
@@ -2612,8 +2658,7 @@ class Peer(Common):
             share_name = path_elements[0]
             
             # Read the directory name associated with this share.
-            thread, directory, date, mode = \
-                self.shares[(share_name, self.hostaddr)]
+            share = self.shares[(share_name, self.hostaddr)]
             
             # Construct a path to the object below the shared
             # directory.
@@ -2628,7 +2673,7 @@ class Peer(Common):
             #print path
             
             # Append this path to the shared directory's path.
-            path = os.path.join(directory, path)
+            path = os.path.join(share.directory, path)
                     
             #print 'Request to catalogue "%s"' % path
             
@@ -3019,14 +3064,15 @@ class Peer(Common):
         
         # Threads for share broadcasts
         
-        for (name, host), (thread, directory, date, mode) in \
-            self.shares.items():
+        for (name, host), share in self.shares.items():
         
             # Only terminate threads for shares on this host.
             if host == self.hostaddr:
             
                 print "Terminating thread for share: %s" % name
-                self.share_events[(name, host)].set()
+                self.shares[(name, host)].event.set()
+                
+                thread = self.shares[(name, host)].thread
                 
                 # Wait until the thread terminates.
                 while thread.isAlive():
@@ -3091,11 +3137,14 @@ class Peer(Common):
             
             print
     
-    def add_share(self, name, directory, mode = 0644, delay = 30):
+    def add_share(self, name, directory, mode = 0644, delay = 30,
+                  present = "truncate", filetype = DEFAULT_FILETYPE):
     
-        """add_share(self, name, directory, mode = 0644, delay = 30)
+        """add_share(self, name, directory, mode = 0644, delay = 30,
+                     present = "truncate", filetype = DEFAULT_FILETYPE)
         
-        Add the named share to the shares available to other hosts.
+        Create a Share object and it to the dictionary of shares available
+        to other hosts.
         """
         
         if self.shares.has_key((name, self.hostaddr)):
@@ -3103,36 +3152,55 @@ class Peer(Common):
             print "Share is already available: %s" % name
             return
         
-        # Determine the protected flag to broadcast by examining the
-        # other users write bit.
-        if (mode & os.path.stat.S_IWOTH) == 0:
+        # Ensure that the values passed are reasonable and that the
+        # directory exists.
+        try:
         
-            protected = 1
+            if not os.path.isdir(directory):
+            
+                raise ShareError, "Share directory is invalid: %s" % directory
         
-        else:
+        except OSError:
         
-            protected = 0
+            raise ShareError, "Share directory is invalid: %s" % directory
         
-        # Create an event to use to inform the share that it must be
-        # removed.
-        event = threading.Event()
+        try:
         
-        self.share_events[(name, self.hostaddr)] = event
+            # Mode value must be valid octal.
+            mode = self.coerce(
+                string.atoi, (mode, 8), (ValueError,), ShareError,
+                "Invalid octal value for mode mask: %s" % mode
+                )
+            
+            # Delay value must be decimal, "off" or "default".
+            if delay == "default":
+            
+                delay = DEFAULT_SHARE_DELAY
+            
+            elif delay == "off":
+            
+                pass
+            
+            else:
+            
+                delay = self.coerce(
+                    float, (delay,), (ValueError,), ShareError,
+                    "Invalid delay value: %s" % delay
+                    )
+            
+            # Filetype value must be valid hexadecimal.
+            filetype = self.coerce(
+                string.atoi, (filetype, 16), (ValueError,), ShareError,
+                "Invalid hexadecimal value for filetype: %s" % filetype
+                )
+            
+            share = Share(name, directory, mode, delay, present, filetype, self)
+            
+            self.shares[(name, self.hostaddr)] = share
         
-        # Create a thread to run the share broadcast loop.
-        thread = threading.Thread(
-            group = None, target = self.broadcast_share,
-            name = 'Share "%s"' % name, args = (name, event),
-            kwargs = {"protected": protected, "delay": delay}
-            )
+        except ShareError:
         
-        # Determine the current time to use for the date of creation.
-        date = time.localtime(time.time())
-        
-        self.shares[(name, self.hostaddr)] = (thread, directory, date, mode)
-        
-        # Start the thread.
-        thread.start()
+            sys.stderr.write("Share could not be created: %s\n" % name)
     
     def remove_share(self, name):
     
@@ -3147,9 +3215,11 @@ class Peer(Common):
             return
         
         # Set the relevant event object's flag.
-        self.share_events[(name, self.hostaddr)].set()
+        event = self.shares[(name, self.hostaddr)].event
         
-        thread, directory, date, mode = self.shares[(name, self.hostaddr)]
+        event.set()
+        
+        thread = self.shares[(name, self.hostaddr)].thread
         
         # Wait until the thread terminates.
         while thread.isAlive():
@@ -3158,7 +3228,6 @@ class Peer(Common):
         
         # Remove the thread and the event from their respective dictionaries.
         del self.shares[(name, self.hostaddr)]
-        del self.share_events[(name, self.hostaddr)]
     
     def add_printer(self, name):
     
@@ -3225,7 +3294,7 @@ class Peer(Common):
                     # Remove the claimed message from the list.
                     self.share_messages.remove(data)
                     
-                    self.data = data
+                    #self.data = data
                     
                     # Reply indicating that valid data was received.
                     return 1, data
@@ -3368,7 +3437,7 @@ class Peer(Common):
     
         """open(self, name, host)
         
-        Open a share of a given name on the host specified.
+        Open a resource of a given name on the host specified.
         """
         
         msg = ["A", 1, 0, name+"\x00"]
@@ -3687,7 +3756,8 @@ class Peer(Common):
             
                 f.seek(from_addr, 0)
                 
-                # Send a message with the amount of data specified.
+                # Send a message with the offset of that data within the
+                # file.
                 msg = ["d"+reply_id, from_addr]
                 self.log("sent", msg, (host, 49171))
                 
@@ -3864,14 +3934,17 @@ class Peer(Common):
         
             f = open(path, "rb")
             
-            from_addr = 0
+            start_addr = 0
             
-            while from_addr < length:
+            while start_addr < length:
             
                 # Send the file, from the start to  its length.
-                next_addr = min(length, from_addr + SEND_SIZE - 8)
+                next_addr = min(length, start_addr + SEND_SIZE - 8)
                 
-                msg = ["A", 0xc, info["handle"], from_addr, next_addr - from_addr]
+                # Send the start offset into the file and the amount of data
+                # to be transferred.
+                msg = [ "A", 0xc, info["handle"], start_addr,
+                        next_addr - start_addr ]
                 
                 # Send the request.
                 replied, data = self._send_request(msg, host, ["w"])
@@ -3884,10 +3957,11 @@ class Peer(Common):
                     self.delete(ros_path, host)
                     return
                 
-                # A reply containing two words was returned. Presumably, the
-                # second is the length of the data to be sent and the first is
-                # the position in the file of the data requested (like the
-                # get method's "B" ... 0xb message.
+                # A reply containing two words was returned. These are the
+                # start and end offsets into the file relative to the
+                # start offset we gave previously.
+                
+                from_addr = start_addr
                 
                 while 1:
                 
@@ -3895,20 +3969,28 @@ class Peer(Common):
                     
                         # More data requested.
                         reply_id = data[1:4]
-                        from_addr = self.str2num(4, data[4:8])
-                        to_addr = min(self.str2num(4, data[12:16]), next_addr)
+                        
+                        # Convert the relative addresses into absolute ones.
+                        from_addr = start_addr + self.str2num(4, data[4:8])
+                        
+                        to_addr = start_addr + \
+                            min(self.str2num(4, data[12:16]), next_addr)
+                            
                         amount = min(SEND_SIZE, to_addr - from_addr)
                     
                     elif data[0] == "R":
                     
-                        from_addr = self.str2num(4, data[4:8])
-                        total_length = self.str2num(4, data[8:12])
+                        # Convert the relative addresses into absolute ones.
+                        from_addr = start_addr + self.str2num(4, data[4:8])
+                        #total_length = start_addr + self.str2num(4, data[8:12])
                         break
                     
                     f.seek(from_addr, 0)
                     
-                    # Send a message with the amount of data specified.
-                    msg = ["d"+reply_id, from_addr]
+                    # Send a message with the offset of that data within the
+                    # file. The address sent is relative to the start of the
+                    # block specified.
+                    msg = ["d"+reply_id, from_addr - start_addr]
                     self.log("sent", msg, (host, 49171))
                     
                     # Read the data to be sent.
@@ -3925,7 +4007,10 @@ class Peer(Common):
                     # Send the reply as a string.
                     s.sendto(msg, (host, 49171))
                     
-                    msg = ["d", from_addr]
+                    # Send a message with the amount of data specified.
+                    # The address sent is relative to the start of the
+                    # block specified.
+                    msg = ["d", from_addr - start_addr]
     
                     # Wait for messages to arrive with the same ID as
                     # the one used to specify the file to be uploaded.
@@ -3952,6 +4037,9 @@ class Peer(Common):
                         )
                     )
                 sys.stdout.flush()
+                
+                # Increase the start position.
+                start_addr = next_addr
             
             # Remove all relevant messages from the message list.
             messages = self._all_messages(["w", "R"], reply_id)
