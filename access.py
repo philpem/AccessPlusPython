@@ -1259,16 +1259,20 @@ class Translate:
         
             return value, self.to_riscos_filename(filename)
     
-    def filetype_to_suffix(self, filename, filetype):
+    def filetype_to_suffix(self, filename, filetype, present = "truncate"):
     
         # Find the appropriate filetype to use for the filename given.
-        at = string.rfind(filename, "/")
-        
-        if at != -1:
+        #at = string.rfind(filename, "/")
+        #
+        #if at != -1 and present == "suffix":
+        if present == "suffix":
         
             # The suffix includes the "/" character. Replace it with this
             # platform's separator and ignore the filetype.
             return self.from_riscos_filename(filename)
+        
+        # Otherwise append a suffix to the filename to represent the
+        # filetype.
         
         # Find a choice of suffixes to use in the list of mappings.
         suffixes = None
@@ -3297,7 +3301,7 @@ class RemoteShare(Ports, Translate):
     
     def rename(self, name1, name2):
     
-        msg = ["A", 0x9, 0x10, 0, name1 + "\x00"]
+        msg = ["A", 0x9, len(name2), 0, name1 + "\x00"]
         
         replied, data = self._send_request(msg, self.host, ["R"])
         
