@@ -7,10 +7,12 @@
 import glob, os, string, socket, sys, threading, time, types
 
 
-default_filetype = 0xffd
+DEFAULT_FILETYPE = 0xffd
 
 # Find the number of centiseconds between 1900 and 1970.
 between_epochs = ((365 * 70) + 17) * 24 * 360000
+
+RECV_SIZE = 8192
 
 
 class Common:
@@ -236,8 +238,8 @@ class Common:
 #        
 #        return string.join(output, "")
     
-    to_riscos = {".": "/", " ": "\xa0", "/": "."}
-    from_riscos = {"/": ".", "\xa0": " ", ".": "/"}
+    to_riscos = {os.extsep: "/", " ": "\xa0", os.sep: "."}
+    from_riscos = {"/": os.extsep, "\xa0": " ", ".": os.sep}
     
     def _filename(self, name, dict):
     
@@ -347,7 +349,7 @@ class Common:
         if at == -1:
         
             # No suffix: return the default filetype.
-            return default_filetype, self.to_riscos_filename(filename)
+            return DEFAULT_FILETYPE, self.to_riscos_filename(filename)
         
         # The suffix includes the "." character. Remove this platform's
         # separator and replace it with a ".".
@@ -368,11 +370,11 @@ class Common:
                 
                     # The value found was not in a valid hexadecimal
                     # representation. Return the default filetype.
-                    return default_filetype, \
+                    return DEFAULT_FILETYPE, \
                         self.to_riscos_filename(filename)
         
         # No mappings declared the suffix used.
-        return default_filetype, self.to_riscos_filename(filename)
+        return DEFAULT_FILETYPE, self.to_riscos_filename(filename)
     
     def construct_directory_name(self, elements):
     
@@ -446,7 +448,7 @@ class Unused(Common):
         
         try:
         
-            data, address = s.recvfrom(1024)
+            data, address = s.recvfrom(RECV_SIZE)
             
             lines = ["From: %s:%i" % address]
             lines = lines + self.interpret(data)
@@ -590,6 +592,9 @@ class Peer(Common):
         # Keep a list of handles in use but limit its length.
         self.max_handles = 100
         self.handles = []
+        
+        # Start serving.
+        self.serve()
     
     def __del__(self):
     
@@ -975,7 +980,7 @@ class Peer(Common):
         try:
         
             s = self.ports[32770]
-            data, address = s.recvfrom(1024)
+            data, address = s.recvfrom(RECV_SIZE)
             
             self._read_poll_socket(data, address)
         
@@ -988,7 +993,7 @@ class Peer(Common):
         try:
         
             s = self.broadcasters[32770]
-            data, address = s.recvfrom(1024)
+            data, address = s.recvfrom(RECV_SIZE)
             
             self._read_poll_socket(data, address)
         
@@ -1291,7 +1296,7 @@ class Peer(Common):
         try:
         
             s = self.ports[32771]
-            data, address = s.recvfrom(1024)
+            data, address = s.recvfrom(RECV_SIZE)
             
             self._read_listener_socket(data, address)
         
@@ -1304,7 +1309,7 @@ class Peer(Common):
         try:
         
             s = self.broadcasters[32771]
-            data, address = s.recvfrom(1024)
+            data, address = s.recvfrom(RECV_SIZE)
             
             self._read_listener_socket(data, address)
         
@@ -1336,7 +1341,7 @@ class Peer(Common):
         try:
         
             s = self.ports[49171]
-            data, address = s.recvfrom(1024)
+            data, address = s.recvfrom(RECV_SIZE)
             
             self._read_share_socket(s, data, address)
         
@@ -1349,7 +1354,7 @@ class Peer(Common):
         try:
         
             s = self.broadcasters[49171]
-            data, address = s.recvfrom(1024)
+            data, address = s.recvfrom(RECV_SIZE)
             
             self._read_share_socket(s, data, address)
         
@@ -1711,6 +1716,8 @@ class Peer(Common):
             pos = self.str2num(4, data[12:16])
             length = self.str2num(4, data[16:20])
             
+            print "Data request", hex(handle), pos, length
+            
             # Match the handle to the file to use.
             path = None
             
@@ -1745,7 +1752,7 @@ class Peer(Common):
                     
                     # Add a trailer onto the end of the data of length
                     # 0xc if all the data has been written.
-                    if len(data) < length:
+                    if len(data) <= length:
                     
                         trailer = ["B"+data[1:4], len(data), len(data)]
                     
@@ -1755,6 +1762,9 @@ class Peer(Common):
                         # end of the list for future use.
                         trailer = []
                         self.handles.append( (handle, path) )
+                    
+                    print len(data), length
+                    print "Trailer:", trailer
                     
                     # Write the message to send.
                     msg = ["S"+data[1:4], len(data), 0xc, data] + trailer
@@ -2088,7 +2098,7 @@ class Peer(Common):
         # client (it passes them back).
         new_id = self.new_id()
         
-        data = ["A"+new_id, 1, 0, name]
+        data = ["A"+new_id, 1, 0, name+"\x00"]
         
         # Send the request.
         self._send_list(data, s, (host, 49171))
@@ -2148,7 +2158,7 @@ class Peer(Common):
         object_type = self.str2num(4, data[20:24])
         handle = self.str2num(4, data[24:28])
         
-        print hex(handle)
+        #print hex(handle)
         
         # Return the information on the item.
         return { "filetype": filetype, "date": date,
@@ -2165,12 +2175,6 @@ class Peer(Common):
         given.
         """
         
-        if not self.open_shares.has_key((name, host)):
-        
-            # This may be required for mounting purposes.
-            pass
-        
-        
         # Use the non-broadcast socket.
         if not self.ports.has_key(49171):
         
@@ -2185,7 +2189,12 @@ class Peer(Common):
         # dictionary.
         new_id = self.new_id()
         
-        data = ["B"+new_id, 3, 0xffffffff, 0, name]
+        data = ["B"+new_id, 3, 0xffffffff, 0, name+"\x00"]
+        
+        for line in self.interpret(self._encode(data)):
+        
+            print line
+        print
         
         # Send the request.
         self._send_list(data, s, (host, 49171))
@@ -2295,6 +2304,10 @@ class Peer(Common):
                     )
                 )
         
+        for line in lines:
+        
+            print line
+        
         # The data following the directory structure is concerned
         # with the share and is like a return value from a share
         # open request but with a "B" command word like a
@@ -2332,9 +2345,12 @@ class Peer(Common):
         file_data = []
         pos = 0
         
+        # Request packets smaller than the receive buffer size.
+        packet_size = RECV_SIZE - 24
+        
         while 1:
         
-            data = ["B"+new_id, 0xb, handle, pos, 0x400]
+            data = ["B"+new_id, 0xb, handle, pos, 0x800]
             
             # Send the request.
             self._send_list(data, s, (host, 49171))
@@ -2387,11 +2403,24 @@ class Peer(Common):
             trailer_length = self.str2num(4, data[8:12])
             file_data.append(data[12:12+length])
             
+            #print length, trailer_length, len(data)
+            
             pos = pos + length
             
             if len(data[12+length:]) == trailer_length:
             
+                returned = self.str2num(4, data[12+length+4:12+length+8])
+                new_pos = self.str2num(4, data[12+length+8:12+length+12])
+                
                 # We have found the file's trailer.
+                sys.stdout.write(
+                    "\rRead %i/%i bytes of file %s" % (
+                        new_pos, info["length"], name
+                        )
+                    )
+            
+            if pos >= info["length"]:
+            
                 break
         
         return string.join(file_data, "")
