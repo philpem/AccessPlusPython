@@ -586,6 +586,10 @@ class Peer(Common):
         # the name of the share and the host it resides on and contains the
         # ID value used to open it.
         self.open_shares = {}
+        
+        # Keep a list of handles in use but limit its length.
+        self.max_handles = 100
+        self.handles = []
     
     def __del__(self):
     
@@ -1359,15 +1363,15 @@ class Peer(Common):
     
         host = address[0]
         
-        print "From: %s:%i" % address
-        
-        lines = self.interpret(data)
-        
-        for line in lines:
-        
-            print line
-        
-        print
+        #print "From: %s:%i" % address
+        #
+        #lines = self.interpret(data)
+        #
+        #for line in lines:
+        #
+        #    print line
+        #
+        #print
             
         if data[0] == "A":
         
@@ -1447,6 +1451,9 @@ class Peer(Common):
                         # Use the inode of the directory as its handle.
                         handle = os.stat(path)[1] & 0xffffffff
                         
+                        # Keep this handle for possible later use.
+                        self.handles.append( (handle, path) )
+                        
                         msg = [ "R"+data[1:4], filetype, date, length,
                                 access_attr, object_type, handle ]
                     
@@ -1462,10 +1469,13 @@ class Peer(Common):
                         
                         access_attr = 0x3
                         
-                        object_type = 0x1
+                        object_type = 0x0101
                         
                         # Use the inode of the file as its handle.
-                        handle = os.stat(path)[1] & 0xffffffff
+                        handle = os.stat(path)[1]# & 0xffffff7f
+                        
+                        # Keep this handle for possible later use.
+                        self.handles.append( (handle, path) )
                         
                         msg = [ "R"+data[1:4], filetype, date, length,
                                 access_attr, object_type, handle ]
@@ -1475,12 +1485,12 @@ class Peer(Common):
                         # Reply with an error message.
                         msg = ["E"+data[1:4], 0x100d6, "Not found"]
                 
-                print
-                print "Sent:"
-                for line in self.interpret(self._encode(msg)):
-                
-                    print line
-                print
+                #print
+                #print "Sent:"
+                #for line in self.interpret(self._encode(msg)):
+                #
+                #    print line
+                #print
                 
                 # Send a reply.
                 self._send_list(msg, _socket, address)
@@ -1693,20 +1703,84 @@ class Peer(Common):
                     _socket, address
                     )
         
-        #elif data[0] == "B" and self.str2num(4, data[4:8]) == 0xb:
-        #
-        #    # Some sort of file request.
-        #    pass
+        elif data[0] == "B" and self.str2num(4, data[4:8]) == 0xb:
+        
+            # Data request
+            
+            handle = self.str2num(4, data[8:12])
+            pos = self.str2num(4, data[12:16])
+            length = self.str2num(4, data[16:20])
+            
+            # Match the handle to the file to use.
+            path = None
+            
+            for i in range(len(self.handles) - 1, -1, -1):
+            
+                this_handle, this_path = self.handles[i]
+                
+                if handle == this_handle:
+                
+                    path = this_path
+                    break
+            
+            if path is None:
+            
+                # Reply with an error message.
+                msg = ["E"+data[1:4], 0x100d6, "Not found"]
+            
+            else:
+            
+                # Remove the entry from the list.
+                self.handles.remove( (handle, path) )
+                
+                print path, pos
+                
+                try:
+                
+                    # Read the data from the file.
+                    f = open(path, "rb")
+                    f.seek(pos, 0)
+                    data = f.read(length)
+                    f.close()
+                    
+                    # Add a trailer onto the end of the data of length
+                    # 0xc if all the data has been written.
+                    if len(data) < length:
+                    
+                        trailer = ["B"+data[1:4], len(data), len(data)]
+                    
+                    else:
+                    
+                        # Don't add a trailer but put the entry at the
+                        # end of the list for future use.
+                        trailer = []
+                        self.handles.append( (handle, path) )
+                    
+                    # Write the message to send.
+                    msg = ["S"+data[1:4], len(data), 0xc, data] + trailer
+                
+                except IOError:
+                
+                    # Reply with an error message.
+                    msg = ["E"+data[1:4], 0x100d6, "Not found"]
+            
+            #print "Sent:"
+            #for line in self.interpret(self._encode(msg)):
+            #
+            #    print line
+            #print
+            
+            # Send the message.
+            self._send_list(msg, _socket, address)
         
         elif data[0] == "B" and self.str2num(4, data[4:8]) == 0xd:
         
             # Rebroadcasted request for information.
             
             # Reply with an error message.
-            self._send_list(
-                ["E"+data[1:4], 0x163ac, "Shared disc not available."],
-                _socket, address
-                )
+            msg = ["E"+data[1:4], 0x163ac, "Shared disc not available."]
+            
+            self._send_list(msg, _socket, address)
         
         elif data[0] == "R":
         
@@ -1747,12 +1821,23 @@ class Peer(Common):
     
     def listen(self, event):
     
+        t0 = time.time()
+        
         while 1:
         
             # Read any response.
-            response = self.read_poll_socket()
-            respones = self.read_listener_socket()
-            response = self.read_share_socket()
+            self.read_poll_socket()
+            self.read_listener_socket()
+            self.read_share_socket()
+            
+            if (time.time() - t0) > 60.0:
+            
+                # Reset the timer and prune the list of handles.
+                t0 = time.time()
+                
+                if len(self.handles) > self.max_handles:
+                
+                    self.handles = self.handles[-self.max_handles:]
             
             if event.isSet(): return
     
@@ -2238,48 +2323,75 @@ class Peer(Common):
         
         handle = info["handle"]
         
-        data = ["B"+new_id, 0xb, handle, 0, info["length"]]
+        #print "Sent:"
+        #for line in self.interpret(self._encode(data)):
+        #
+        #    print line
+        #print
         
-        print "Sent:"
-        for line in self.interpret(self._encode(data)):
+        file_data = []
+        pos = 0
         
-            print line
-        print
+        while 1:
         
-        return
-        
-        # Send the request.
-        self._send_list(data, s, (host, 49171))
-        
-        replied = 0
-        tries = 5
-
-        # Keep a record of the time of the previous request.
-        t0 = time.time()
-        
-        while replied == 0 and tries > 0:
-        
-            # See if the response has arrived.
-            for data in self.share_messages:
+            data = ["B"+new_id, 0xb, handle, pos, 0x400]
             
-                if data[:4] == "E"+new_id:
+            # Send the request.
+            self._send_list(data, s, (host, 49171))
+            
+            replied = 0
+            tries = 5
+    
+            # Keep a record of the time of the previous request.
+            t0 = time.time()
+            
+            while replied == 0 and tries > 0:
+            
+                # See if the response has arrived.
+                for data in self.share_messages:
                 
-                    self.share_messages.remove(data)
+                    if data[:4] == "S"+new_id:
                     
-                    return []
-            
-            t1 = time.time()
-            
-            if replied == 0 and (t1 - t0) > 1.0:
-            
-                # Send the request again.
-                self._send_list(data, s, (host, 49171))
+                        self.share_messages.remove(data)
+                        
+                        self.data = data
+                        
+                        # Catalogue information was returned.
+                        replied = 1
+                        
+                        break
+                    
+                    elif data[:4] == "E"+new_id:
+                    
+                        self.share_messages.remove(data)
+                        
+                        return []
                 
-                t0 = t1
-                tries = tries - 1
+                t1 = time.time()
+                
+                if replied == 0 and (t1 - t0) > 1.0:
+                
+                    # Send the request again.
+                    self._send_list(data, s, (host, 49171))
+                    
+                    t0 = t1
+                    tries = tries - 1
+            
+            if replied == 0:
+            
+                print "The machine containing the shared disc does not respond"
+                return
+            
+            # Read the header.
+            length = self.str2num(4, data[4:8])
+            trailer_length = self.str2num(4, data[8:12])
+            file_data.append(data[12:12+length])
+            
+            pos = pos + length
+            
+            if len(data[12+length:]) == trailer_length:
+            
+                # We have found the file's trailer.
+                break
         
-        if replied == 0:
-        
-            print "The machine containing the shared disc does not respond"
-            return
-        
+        return string.join(file_data, "")
