@@ -1,0 +1,90 @@
+# > InetDBase:MimeMap
+# Mapping of content types to file types
+#
+# Lines starting with a '#' are comments, blank lines are ignored.
+#
+# A '*' is a wild before or after the / or for the RISC OS file type
+# The first match that does not map to a wildcard if the one that is used.
+#
+# If the file type name is not known but a hex value is given that type
+# is used, otherwise it is not considered a match.
+#
+# MIME type/subtype		RISC OS name	Hex	Extensions
+
+text/html			HTML		faf	.html .htm .iso-html
+text/plain			Text		fff	.txt .c .cc .h
+text/richtext			RTF		c32	.rtx
+text/x-vcard			vCard		acf	.vcf
+text/*				Text		fff
+
+image/jpeg			JPEG		c85	.jpeg .jpg .jpe .jfif
+image/pjpeg			JPEG		c85	.pjpeg .pjpg
+image/gif			GIF		695	.gif
+image/tiff			TIFF		ff0	.tiff .tif
+image/png			PNG		b60	.png
+image/xpng			PNG		b60
+image/xbm			XBitMap		b61	.xbm
+image/x-bitmap			XBitMap		b61
+image/x-photo-cd		PhotoCD		be8
+image/x-xpixmap			XPM		301     .xpm
+image/photo-cd			PhotoCD		be8	.pcd
+image/x-photo-cd		PhotoCD		be8
+image/x-MS-bmp			BMP		69c	.bmp
+image/x-riscos-sprite		Sprite		ff9	.spr
+
+audio/basic			WaveForm	fb1	.au .snd
+audio/wav			WaveForm	fb1	.wav
+audio/x-wav			WaveForm	fb1
+audio/aiff			AIFF		fc2	.aifc .aif .aiff
+audio/x-aiff			AIFF		fc2
+audio/mpeg			MPEG		bf8	.mpa
+audio/x-mpeg			MPEG		bf8
+audio/midi			Midi		fd4	.midi .mid
+audio/x-midi			Midi		fd4
+audio/x-pn-realaudio		RealAud		f88	.ram .rpm .ra
+audio/*				GenSound	f96	.voc
+
+video/mpeg			MPEG		bf8	.mpeg .mpg .mpv
+video/x-mpeg2			MPEG		bf8
+video/acorn-replay		ARMovie		ae7	.replay .rpl
+video/quicktime			AVI		fb2	.mov
+video/x-msvideo			AVI		fb2	.avi
+video/msvideo			AVI		fb2
+
+x-world/x-vrml			VRML		b29	.wrl
+model/vrml			VRML		b29	.wrl
+
+message/rfc822			Marcel		b86	.mbox
+message/*			Text		fff
+
+application/postscript		PoScript	ff5	.ps .eps
+application/x-director		Director	ae3	.dxr .dcr .dir
+application/x-dvi		DVI		ce4     .dvi
+application/dvi			DVI		ce4	
+application/x-latex		latex		2a8	.ltx
+application/x-tex		tex		ce5     .tex
+application/x-tex		tex		2a7
+application/octet-stream	Data		ffd
+application/gzip		GZip		f89	.gz .gzip .tgz
+application/x-gzip		GZip		f89
+application/zip			Archive		ddc	.zip .arc .spk .lha .arj .lzh
+application/compress		Archive		ddc	.Z .z
+application/x-compress		Archive		ddc
+application/pdf			PDF		adf	.pdf
+application/java-vm		Java		ae4	.class
+application/x-chat		Chat		17a	.chat .cha
+application/x-nschat		Chat		17a	.nsc
+application/msword		MSWord		ae6	.doc
+application/nc-smartcard	SCBBlk		f94	.scb
+application/nc-download		NCDown		f93	.ncd
+application/internetsetup	Install		2E1	.ins
+application/x-shockwave-flash	Flash		188	.swf
+application/riscos		*		*
+application/z5			Z-Code5		065	.z5
+application/z8			Z-Code8		068	.z8
+
+multipart/x-mixed-replace	Data		ffd
+
+x-riscos/printerdef             PrntDefn        fc6     .prdef
+
+*/*				Data		ffd
