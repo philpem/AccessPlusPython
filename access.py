@@ -27,7 +27,7 @@ DEALINGS IN THE SOFTWARE.
 
 __version__ = "0.29"
 
-import glob, os, string, socket, sys, threading, time, types
+import glob, os, string, socket, struct, sys, threading, time, types
 
 if not os.__dict__.has_key("extsep"):
 
@@ -373,7 +373,9 @@ class Common:
         # Extract the filetype and date.
         filetype = long((filetype_word & 0xfff00) >> 8)
         
-        date_num = ((filetype_word & 0xff) << 32) | long(date_word)
+        #date_num = ((filetype_word & 0xff) << 32) | long(date_word)
+        date_num = struct.unpack("<Q",
+            struct.pack("<IBxxx", date_word, filetype_word & 0xff))[0]
         date = self.from_riscos_time(date_num)
         
         return filetype, date
