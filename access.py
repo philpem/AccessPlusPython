@@ -1032,7 +1032,7 @@ class File:
     
     def read(self, length):
     
-        self.fh.read(length)
+        return self.fh.read(length)
     
     def write(self, data):
     
@@ -3495,11 +3495,14 @@ class RemoteShare(Ports, Translate):
     
     def settype(self, ros_path, filetype):
     
-        name = self.name
+        #name = self.name
+        #
+        #if ros_path != "":
+        #
+        #    name = name + "." + ros_path
         
-        if ros_path != "":
-        
-            name = name + "." + ros_path
+        # Prefixing the path with the share name does not always work.
+        name = ros_path
         
         # Obtain information on the file (open it).
         info = self.open(name)
