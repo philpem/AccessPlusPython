@@ -1690,7 +1690,8 @@ class Share(Ports, Translate):
         # other users write bit.
         if (mode & os.path.stat.S_IWOTH) == 0:
         
-            self.share_type |= SHARE_TYPE_PROTECTED
+            if self.share_type == SHARE_TYPE_NORMAL or self.share_type == SHARE_TYPE_DIRECTORY:
+                self.share_type |= SHARE_TYPE_PROTECTED
             self.read_mask = PROTECTED_READ
             self.write_mask = PROTECTED_WRITE
         
@@ -5948,7 +5949,7 @@ class Peer(Ports):
             
             share = Share(
                 name, directory, mode, delay, present, filetype, key,
-                SHARE_TYPE_NORMAL, self.file_handler
+                share_type, self.file_handler
                 )
             
             self.shares[(name, Hostaddr)] = share
@@ -6042,8 +6043,8 @@ class Peer(Ports):
             #
             #self.shares[(PrintShareName, Hostaddr)] = share
             self.add_share(
-                PrintShareName, directory, 0666, delay, "truncate", filetype
-                )
+                PrintShareName, directory, 0666, delay, "truncate", filetype,
+                0, SHARE_TYPE_HIDDEN)
     
     def remove_printer(self, name):
     
