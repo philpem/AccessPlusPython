@@ -5150,6 +5150,15 @@ class Peer(Ports):
                 # Send a reply.
                 self._send_list(msg, _socket, address)
             
+            elif code == 0x8:
+                # Get free space
+
+                handle = self.str2num(4, data[8:12])
+
+                msg = ["E"+reply_id, 0x163ac, "Free space not available"]
+
+                self._send_list(msg, _socket, address)
+
             elif code == 0x9:
             
                 # Rename file on our machine.
@@ -5490,6 +5499,15 @@ class Peer(Ports):
                 # Send a reply.
                 self._send_list(msg, _socket, address)
         
+            elif code == 0x16:
+                # Get 32 bit free space
+
+                handle = self.str2num(4, data[8:12])
+
+                msg = ["E"+reply_id, 0x163ac, "Free space not available"]
+
+                self._send_list(msg, _socket, address)
+
         elif command == "B" and code == 0x3:
         
             # Request for information.
