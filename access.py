@@ -95,7 +95,7 @@ SHARE_TYPE_PROTECTED = 0x01
 SHARE_TYPE_APP       = 0x02
 SHARE_TYPE_HIDDEN    = 0x04
 SHARE_TYPE_DIRECTORY = 0x08
-SHARE_TYPE_CDTROM    = 0x10
+SHARE_TYPE_CDROM     = 0x10
 
 # Debugging and logging settings
 
@@ -1670,7 +1670,7 @@ class Share(Ports, Translate):
     """
     
     def __init__(self, name, directory, mode, delay, present, filetype, key,
-                 file_handler):
+                 share_type, file_handler):
     
         # Call the initialisation methods of the base classes.
         Ports.__init__(self)
@@ -1679,17 +1679,20 @@ class Share(Ports, Translate):
         # Keep a reference to the parent objects file handler.
         self.file_handler = file_handler
         
+        self.share_type = share_type
+        if key != 0:
+            self.share_type = SHARE_TYPE_DIRECTORY
+
         # Determine the protected flag to broadcast by examining the
         # other users write bit.
         if (mode & os.path.stat.S_IWOTH) == 0:
         
-            self.protected = 1
+            self.share_type |= SHARE_TYPE_PROTECTED
             self.read_mask = PROTECTED_READ
             self.write_mask = PROTECTED_WRITE
         
         else:
         
-            self.protected = 0
             self.read_mask = UNPROTECTED_READ
             self.write_mask = UNPROTECTED_WRITE
         
@@ -1708,7 +1711,7 @@ class Share(Ports, Translate):
         self.key = key
         
         # The filetype of the share directory itself.
-        self.share_type = 0xfcd
+        self.share_filetype = 0xfcd
         
         # Convert the share's mode mask to a file attribute mask.
         self.access_attr = self.to_riscos_access(mode = mode)
@@ -1745,7 +1748,7 @@ class Share(Ports, Translate):
         [
             0x00010004, 0x00010001, 0x00010000 | len(self.name),
             self.get_key(),
-            self.name + chr(SHARE_TYPE_DIRECTORY)
+            self.name + chr(self.share_type)
         ]
         
         self._send_list(data, s, dest)
@@ -1776,7 +1779,7 @@ class Share(Ports, Translate):
         data = \
         [
             0x00010002, 0x00010000, 0x00010000 | len(self.name),
-            self.name + chr(self.protected & SHARE_TYPE_PROTECTED)
+            self.name + chr(self.share_type)
         ]
         
         self._send_list(data, s, (Broadcast_addr, 32770))
@@ -1808,7 +1811,7 @@ class Share(Ports, Translate):
         data = \
         [
             0x00010004, 0x00010000, 0x00010000 | len(self.name),
-            self.name + chr(self.protected & SHARE_TYPE_PROTECTED)
+            self.name + chr(self.share_type)
         ]
         
         if self.key != 0:
@@ -1832,7 +1835,7 @@ class Share(Ports, Translate):
         data = \
         [
             0x00010003, 0x00010000, 0x00010000 | len(self.name),
-            self.name + chr(self.protected & SHARE_TYPE_PROTECTED)
+            self.name + chr(self.share_type)
         ]
     
     #def notify_share_users(self, 
@@ -1895,7 +1898,7 @@ class Share(Ports, Translate):
             cs = self.to_riscos_time()
             
             filetype_word, date_word = \
-                self._make_riscos_filetype_date(self.share_type, cs)
+                self._make_riscos_filetype_date(self.share_filetype, cs)
             
             # Mask the access attributes of this file with the share's access
             # mask.
@@ -2641,9 +2644,6 @@ class RemoteShare(Ports, Translate):
         
         return info
     
-    def _send_secure_share(self, dest):
-        pass
-
     def get_key(self):
         return 0
 
@@ -3729,7 +3729,7 @@ class Printer(Ports):
         data = \
         [
             0x00020003, 0x00010000, 0x00010000 | len(self.name),
-            self.name + chr(self.protected & SHARE_TYPE_PROTECTED)
+            self.name + chr(self.share_type)
         ]
         
         self._send_list(data, s, (Broadcast_addr, 32770))
@@ -3991,7 +3991,7 @@ class Peer(Ports):
                 # Try to create this share.
                 try:
                 
-                    self.add_share(name, path, mode, delay, present, filetype, 0)
+                    self.add_share(name, path, mode, delay, present, filetype, 0, SHARE_TYPE_NORMAL)
                 
                 except ShareError:
                 
@@ -4005,7 +4005,7 @@ class Peer(Ports):
                 # Try to create this share.
                 try:
                 
-                    self.add_share(name, path, mode, delay, present, filetype, key)
+                    self.add_share(name, path, mode, delay, present, filetype, key, SHARE_TYPE_NORMAL)
                 
                 except ShareError:
                 
@@ -5873,10 +5873,12 @@ class Peer(Ports):
             sys.stdout.write("\n")
     
     def add_share(self, name, directory, mode = 0644, delay = 30,
-                  present = "truncate", filetype = DEFAULT_FILETYPE, key = 0):
+                  present = "truncate", filetype = DEFAULT_FILETYPE, key = 0,
+                  share_type = SHARE_TYPE_NORMAL):
     
         """add_share(self, name, directory, mode = 0644, delay = 30,
-                     present = "truncate", filetype = DEFAULT_FILETYPE)
+                     present = "truncate", filetype = DEFAULT_FILETYPE,
+                     key = 0, share_type = SHARE_TYPE_NORMAL)
         
         Create a Share object and it to the dictionary of shares available
         to other hosts.
@@ -5942,7 +5944,7 @@ class Peer(Ports):
             
             share = Share(
                 name, directory, mode, delay, present, filetype, key,
-                self.file_handler
+                SHARE_TYPE_NORMAL, self.file_handler
                 )
             
             self.shares[(name, Hostaddr)] = share
