@@ -89,6 +89,13 @@ UNPROTECTED_WRITE = USER_WRITE | os.path.stat.S_IWGRP | os.path.stat.S_IWOTH
 
 ROS_DIR_LENGTH = 0x800
 
+# Disc share types
+SHARE_TYPE_NORMAL    = 0x00
+SHARE_TYPE_PROTECTED = 0x01
+SHARE_TYPE_APP       = 0x02
+SHARE_TYPE_HIDDEN    = 0x04
+SHARE_TYPE_DIRECTORY = 0x08
+SHARE_TYPE_CDTROM    = 0x10
 
 # Debugging and logging settings
 
@@ -1662,7 +1669,7 @@ class Share(Ports, Translate):
     A class encapsulating a share on a local or remote machine.
     """
     
-    def __init__(self, name, directory, mode, delay, present, filetype,
+    def __init__(self, name, directory, mode, delay, present, filetype, key,
                  file_handler):
     
         # Call the initialisation methods of the base classes.
@@ -1698,6 +1705,7 @@ class Share(Ports, Translate):
         self.present = present
         self.filetype = filetype
         self.delay = delay
+        self.key = key
         
         # The filetype of the share directory itself.
         self.share_type = 0xfcd
@@ -1718,6 +1726,31 @@ class Share(Ports, Translate):
         # Start the thread.
         self.thread.start()
     
+    def get_key(self):
+        return self.key
+
+    def _send_secure_share(self, dest):
+
+        if self.get_key() == 0:
+            return
+
+        if not self.broadcasters.has_key(32771):
+        
+            print "No socket to use for port %i" % 32771
+            return
+        
+        s = self.broadcasters[32771]
+        
+        data = \
+        [
+            0x00010004, 0x00010001, 0x00010000 | len(self.name),
+            self.get_key(),
+            self.name + chr(SHARE_TYPE_DIRECTORY)
+        ]
+        
+        self._send_list(data, s, dest)
+        
+
     def broadcast_share(self):
     
         """broadcast_share(self)
@@ -1727,17 +1760,23 @@ class Share(Ports, Translate):
         
         # Broadcast the availability of the share on the polling socket.
         
+        if self.key != 0:
+            return
+
         if not self.broadcasters.has_key(32770):
         
             print "No socket to use for port %i" % 32770
             return
         
+        if (self.key != 0):
+            disc += 0x1
+
         s = self.broadcasters[32770]
         
         data = \
         [
             0x00010002, 0x00010000, 0x00010000 | len(self.name),
-            self.name + chr(self.protected & 1)
+            self.name + chr(self.protected & SHARE_TYPE_PROTECTED)
         ]
         
         self._send_list(data, s, (Broadcast_addr, 32770))
@@ -1769,9 +1808,13 @@ class Share(Ports, Translate):
         data = \
         [
             0x00010004, 0x00010000, 0x00010000 | len(self.name),
-            self.name + chr(self.protected & 1)
+            self.name + chr(self.protected & SHARE_TYPE_PROTECTED)
         ]
         
+        if self.key != 0:
+            # We only want to broadcast the secure share once
+            return
+
         while 1:
         
             self._send_list(data, s, (Broadcast_addr, 32770))
@@ -1789,7 +1832,7 @@ class Share(Ports, Translate):
         data = \
         [
             0x00010003, 0x00010000, 0x00010000 | len(self.name),
-            self.name + chr(self.protected & 1)
+            self.name + chr(self.protected & SHARE_TYPE_PROTECTED)
         ]
     
     #def notify_share_users(self, 
@@ -2598,6 +2641,12 @@ class RemoteShare(Ports, Translate):
         
         return info
     
+    def _send_secure_share(self, dest):
+        pass
+
+    def get_key(self):
+        return 0
+
     def open(self, ros_path):
     
         """open(self, name)
@@ -3680,7 +3729,7 @@ class Printer(Ports):
         data = \
         [
             0x00020003, 0x00010000, 0x00010000 | len(self.name),
-            self.name + chr(self.protected & 1)
+            self.name + chr(self.protected & SHARE_TYPE_PROTECTED)
         ]
         
         self._send_list(data, s, (Broadcast_addr, 32770))
@@ -3802,7 +3851,7 @@ class Peer(Ports):
         Each line of the .access file describing directory/disc shares must
         conform to the following syntax:
         
-        <share> <path> <mode> <delay> <translation> <filetype>
+        <share> <path> <mode> <delay> <translation> <filetype> <key>
         
         The "share" parameter is the name by which other clients
         refer to the contents of the shared directory.
@@ -3824,12 +3873,14 @@ class Peer(Ports):
         indicating that filename suffixes are either to be presented
         to other clients or truncated.
         
-        A final parameter is the default filetype to be used for
+        A "filetype" parameter is the default filetype to be used for
         files whose type cannot be determined using the MimeMap
         file. This should take the form of a twelve bit integer in
         Python or C hexadecimal form, e.g. 0xfff.
         
         myshare /home/user/myfile 0644 off truncate 0xffd
+
+		The "key" parameter is the Access+ key
         
         Printer shares
         
@@ -3940,7 +3991,21 @@ class Peer(Ports):
                 # Try to create this share.
                 try:
                 
-                    self.add_share(name, path, mode, delay, present, filetype)
+                    self.add_share(name, path, mode, delay, present, filetype, 0)
+                
+                except ShareError:
+                
+                    sys.stderr.write("Could not add share: %s\n" % name)
+                    sys.stderr.flush()
+            
+            elif len(values) == 7 and values[0] != "<Printer>":
+            
+                name, path, mode, delay, present, filetype, key = values[0:7]
+                
+                # Try to create this share.
+                try:
+                
+                    self.add_share(name, path, mode, delay, present, filetype, key)
                 
                 except ShareError:
                 
@@ -4780,7 +4845,11 @@ class Peer(Ports):
     
         self.log("received", data, address)
         
+        key = self.str2num(4, data[8:])
         host = address[0]
+        for s in self.shares.values():
+            if s.get_key() == key:
+                s._send_secure_share(address)
     
     def read_share_socket(self):
     
@@ -5786,7 +5855,7 @@ class Peer(Ports):
             sys.stdout.write("\n")
     
     def add_share(self, name, directory, mode = 0644, delay = 30,
-                  present = "truncate", filetype = DEFAULT_FILETYPE):
+                  present = "truncate", filetype = DEFAULT_FILETYPE, key = 0):
     
         """add_share(self, name, directory, mode = 0644, delay = 30,
                      present = "truncate", filetype = DEFAULT_FILETYPE)
@@ -5845,9 +5914,16 @@ class Peer(Ports):
                     string.atoi, (filetype, 16), (ValueError,), ShareError,
                     "Invalid hexadecimal value for filetype: %s" % filetype
                     )
+
+            if type(key) == types.StringType:
+
+                key = self.coerce(
+                    string.atoi, (key, 16), (ValueError,), ShareError,
+                    "Invalid hexadecimal value for key: %s" % filetype
+                    )
             
             share = Share(
-                name, directory, mode, delay, present, filetype,
+                name, directory, mode, delay, present, filetype, key,
                 self.file_handler
                 )
             
