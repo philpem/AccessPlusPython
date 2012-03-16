@@ -328,8 +328,11 @@ class Common:
         # 1970 for this value).
         centiseconds = value - between_epochs
         
+        if (value & 0xffffffff) == 0xDEADDEAD:
+            return time.localtime(0)
+
         # Convert this to a value in seconds and return a time tuple.
-        return time.localtime(centiseconds / 100.0)
+        return time.localtime(int(centiseconds / 100.0))
         
     def to_riscos_time(self, ttuple = None, seconds = 0):
     
@@ -5498,6 +5501,7 @@ class Peer(Ports):
                 
                 # Send a reply.
                 self._send_list(msg, _socket, address)
+
         
             elif code == 0x16:
                 # Get 32 bit free space
