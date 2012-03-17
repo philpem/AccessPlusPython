@@ -1,0 +1,3 @@
+1.  Return correct date and access rights in trailer in catalogue_path()
+2.  Return more than 1 chunk of data from Request B 0x0d
+3.  Setting file's filetype or date stamp failes from RISC OS 5 filer.
