@@ -139,6 +139,9 @@ if at != -1:
 
     Hostname = Hostname[:at]
 
+def round_up(val, up_to):
+    return (val + up_to - 1) & ~(up_to - 1)
+
 # Define the share name to be used for incoming print jobs.
 
 def print_share_name(hostaddr):
@@ -1672,6 +1675,7 @@ class Share(Ports, Translate):
     A class encapsulating a share on a local or remote machine.
     """
     
+
     def __init__(self, name, directory, mode, delay, present, filetype, key,
                  share_type, file_handler):
     
@@ -2324,6 +2328,8 @@ class Share(Ports, Translate):
     
     def catalogue_path(self, ros_path):
     
+        # This should return data in 2048 byte chunks max 
+
         # Convert the RISC OS style path to a path within the share.
         path = self.from_riscos_path(ros_path)
         
@@ -2354,6 +2360,7 @@ class Share(Ports, Translate):
         
         # Write the catalogue information.
         
+        infolist = []
         info = []
         
         # The first word is the length of the directory structure
@@ -2366,6 +2373,7 @@ class Share(Ports, Translate):
         info.append(0x24)
         
         dir_length = 0
+        chunk_length = 0
         
         n_files = 0
         
@@ -2458,9 +2466,26 @@ class Share(Ports, Translate):
                 file_info = []
                 length = 0
             
+            if chunk_length + length > 2048:
+        	# Fill in the directory length.
+                info[0] = chunk_length
+                infolist.append(info)
+                chunk_length = 0
+                info = []
+                info.append(0x0)
+                info.append(0x0c)
+
             info = info + file_info
             dir_length = dir_length + length
+            chunk_length = chunk_length + length
         
+        if len(infolist) == 0 and chunk_length == 0:
+            info[0] = 0
+            infolist.append(info)
+        elif chunk_length > 0:
+            info[0] = chunk_length
+            infolist.append(info)
+
         # The data following the directory structure is concerned
         # with the share and is like a return value from a share
         # open request but with a "B" command word like a
@@ -2471,23 +2496,26 @@ class Share(Ports, Translate):
         
         share_value = (handle & 0xffffff00L) ^ 0xffffff02L
         
+        marker = 0xffffffffL
+        if len(infolist) > 1:
+            marker = 0x00000055L
+
         trailer = \
         [
-            0xffffcd00L, 0x00000000L, 0x00000800L,
+#           The first two words should be filetype and timestamp
+            0xffffcd00L, 0x00000000L,
+            round_up(dir_length, 2048),
             0x00000013L, # Read only for others (0x10); read write for owner
             share_value, # common value for directories in this share
             handle, # handle of object as with info returned for opening
-            dir_length, # number of words used to describe the directory
+            infolist[0][0], # number of words used to describe the directory
                         # contents
-            0xffffffffL
+            marker
         ]
         
-        # Fill in the directory length.
-        info[0] = dir_length
-        
-        # Return the lists used to construct the message and the path
-        # catalogued.
-        return info, trailer, path
+        # Return the lists used to construct the message, the path
+        # catalogued, and the handle
+        return infolist, trailer, path, handle
     
     def send_file(self, fh, pos, length):
     
@@ -3802,6 +3830,9 @@ class Peer(Ports):
         self.printer_events = {}
         self.transfer_events = {}
         
+        # Keep a cache for the directory catalogue
+        self.catalogue_cache = {}
+
         # Create lists of messages sent to each listening socket.
         
         # General messages.
@@ -5509,7 +5540,15 @@ class Peer(Ports):
 
                 handle = self.str2num(4, data[8:12])
 
-                msg = ["E"+reply_id, 0x163ac, "Free space not available"]
+                # response should be in the form
+                #  R+reply_id
+                #  4 bytes free space least significant word
+                #  4 bytes free space most significant word
+                #  4 bytes largest creatable object lest significant word
+                #  4 bytes largest creatable object most significant word
+                #  4 bytes total space least significant word
+                #  4 bytes total space most significant word
+                msg = ["E"+reply_id, 0x116c80, "Free space not available"]
 
                 self._send_list(msg, _socket, address)
 
@@ -5523,12 +5562,16 @@ class Peer(Ports):
             
                 # Read the directory name associated with this share.
                 share = self.shares[(share_name, Hostaddr)]
-                info, trailer, path = share.catalogue_path(ros_path)
+                infolist, trailer, path, handle = share.catalogue_path(ros_path)
                 
-                if info is not None:
+                if infolist is not None:
                 
+                    # Remember thes results for later
+                    if len(infolist) > 1:
+                        self.catalogue_cache[(handle, address)] = infolist
+
                     # Write the message, starting with the code and ID word.
-                    msg = ["S"+reply_id] + info + ["B"+reply_id] + trailer
+                    msg = ["S"+reply_id] + infolist[0] + ["B"+reply_id] + trailer
                     
                     # Send the reply.
                     self._send_list(msg, _socket, address)
@@ -5630,13 +5673,52 @@ class Peer(Ports):
         
         elif (command == "A" or command == "B") and code == 0xd:
         
-            # Rebroadcasted request for information.
+            # FIXME: this only handles 1 chunk of directory correctly
+            # I must get wireshark trace to find out how to handle more
+            # chunks
+
+            # Request for next chunk of information.
+            # Request is in the form: "B"+reply_id+0x0d 0x00 0x00 0x00
+            # 4 bytes directory handle
+            # 4 bytes something (0x55 in my trace.  Request handle?)
+            # 4 bytes offset (or chunk size?)
             
-            # Reply with an error message.
-            msg = ["E"+reply_id, 0x163ac, "Shared disc not available."]
+            dir_handle = self.str2num(4, data[8:12])
+            something = self.str2num(4, data[12:16])
+            offset = self.str2num(4, data[16:20])
+
+            try:
+                infolist = self.catalogue_cache[(dir_handle, address)]
+
+                info = infolist[offset/2048]
+                infolen = info[0]
+
+                # Assume there are chunks to read
+#                marker = 0x55000000L
+                # Until I can work out how to return more than 1 chunk,
+                # pretend this is the last chunk
+                # The user won't see all the contents of the directory,
+                # but RISC OS won't hang.
+                marker = 0xffffffffL
+
+                if offset/2048 == len(infolist) - 1:
+                    # This is the last chunk.
+                    self.catalogue_cache[(dir_handle, address)] = None
+                    marker = 0xffffffffL
+
+                trailer = [
+                    infolen,
+                    marker
+                ]
+
+                msg = ["S"+reply_id] + info + ["B"+reply_id] + trailer
+
+            except KeyError:
+
+                msg = ["E"+reply_id, 0x100d6, "Not found"]
             
             self._send_list(msg, _socket, address)
-        
+
         elif command == "D":
         
             # Request for data to be sent.
