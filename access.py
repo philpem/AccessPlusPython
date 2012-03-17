@@ -2317,6 +2317,10 @@ class Share(Ports, Translate):
             
             fh.path = new_path
         
+        # Stamp with the correct access and modification date
+        t = time.mktime(date)
+        os.utime(fh.path, (t, t))
+
         # Construct the new details for the object.
         filetype, date, length, access_attr, object_type, \
             handle = self.read_path_info(fh.path)
