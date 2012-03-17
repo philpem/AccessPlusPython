@@ -1,3 +1,5 @@
 1.  Return correct date and access rights in trailer in catalogue_path()
 2.  Return more than 1 chunk of data from Request B 0x0d
 3.  Setting file's filetype or date stamp failes from RISC OS 5 filer.
+4.  Set access to "Protected", then setting access to anything else gives a "not found" error.
+5.  Files can be created on protected shares.  They can not be deleted.
