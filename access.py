@@ -27,7 +27,7 @@ DEALINGS IN THE SOFTWARE.
 
 __version__ = "0.29"
 
-import glob, os, string, socket, struct, sys, threading, time, types
+import glob, os, string, socket, struct, sys, threading, time, types, select
 
 if not os.__dict__.has_key("extsep"):
 
@@ -572,7 +572,7 @@ class Ports(Common):
             elif type(item) == types.LongType:
             
                 output.append(self.number(4, item))
-            
+
             else:
             
                 # Pad the string to fit an integer number of words.
@@ -1866,11 +1866,8 @@ class Share(Ports, Translate):
         
             self._send_list(data, s, (Broadcast_addr, 32770))
             
-            t0 = time.time()
-            
-            while (time.time() - t0) < self.delay:
-            
-                if self.event.isSet(): return
+            self.event.wait(self.delay)
+            if self.event.isSet(): return
         
         # Broadcast that the share has now been removed.
         
@@ -3795,11 +3792,8 @@ class Printer(Ports):
         
         while 1:
         
-            t0 = time.time()
-            
-            while (time.time() - t0) < self.delay:
-            
-                if self.event.isSet(): return
+            self.event.wait(self.delay)
+            if self.event.isSet(): return
             
             self._send_list(data, s, (Broadcast_addr, 32770))
         
@@ -4194,11 +4188,8 @@ class Peer(Ports):
         
             self._send_list(data, s, (Broadcast_addr, 32770))
             
-            t0 = time.time()
-            
-            while (time.time() - t0) < delay:
-            
-                if event.isSet(): return
+            event.wait(delay)
+            if event.isSet(): return
         
         # Create a string to send.
         data = \
@@ -5846,18 +5837,25 @@ class Peer(Ports):
     
     def listen(self, event):
     
+        p = select.poll()
+        p.register(self.ports[32770].fileno(), select.POLLIN)
+        if self.access_plus == 1:
+            p.register(self.ports[32771].fileno(), select.POLLIN)
+        p.register(self.ports[49171].fileno(), select.POLLIN)
+
         t0 = time.time()
         
         while 1:
         
-            # Read any response.
-            self.read_poll_socket()
-            
-            if self.access_plus == 1:
-            
-                self.read_listener_socket()
-            
-            self.read_share_socket()
+            fired = p.poll(1000) # Wait 1 second
+
+            for (s, evt) in fired:
+                if s == self.ports[32770].fileno():
+                    self.read_poll_socket()
+                elif self.access_plus == 1 and s == self.ports[32771].fileno():
+                    self.read_listener_socket()
+                elif s == self.ports[49171].fileno():
+                    self.read_share_socket()
             
             if (time.time() - t0) > TIDY_DELAY:
             
@@ -6275,9 +6273,10 @@ if __name__ == "__main__":
     # Wait until interrupted by the user.
     try:
     
+        e = threading.Event()
         while 1:
-        
-            pass
+
+            e.wait(1000) 
     
     except KeyboardInterrupt:
     
