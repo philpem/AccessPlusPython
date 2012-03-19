@@ -40,8 +40,10 @@ if not os.__dict__.has_key("extsep"):
         os.extsep = "/"
 
 
+DEFAULT_FILETYPE_SEPARATOR = ","
 DEFAULT_FILETYPE = 0xffd
-DEFAULT_SUFFIX = os.extsep + "txt"
+#DEFAULT_SUFFIX = os.extsep + "txt"
+DEFAULT_SUFFIX = DEFAULT_FILETYPE_SEPARATOR + "fff"
 #DEFAULT_SUFFIX = ""
 DEFAULT_SHARE_DELAY = 30.0
 DEFAULT_PRINTER_DELAY = 30.0
@@ -1372,9 +1374,17 @@ class Translate:
     
     def suffix_to_filetype(self, filename):
     
+        # Check if the filetype is appended after a comma
+        at = string.rfind(filename, DEFAULT_FILETYPE_SEPARATOR)
+        
+        if at != -1:
+            # comma separated suffix
+            filetype = string.atoi(filename[at+len(DEFAULT_FILETYPE_SEPARATOR):], 16)
+            return filetype, self.to_riscos_filename(filename[:at])
+
         # Find the appropriate filetype to use for the filename given.
         at = string.rfind(filename, os.extsep)
-        
+
         if at == -1:
         
             # No suffix: return the default filetype.
@@ -1477,7 +1487,7 @@ class Translate:
             # No mappings declared the filetype used. Append a suffix
             # containing the three digit hexadecimal filetype value to the
             # end of the name.
-            return self.from_riscos_filename(filename) + os.extsep + \
+            return self.from_riscos_filename(filename) + DEFAULT_FILETYPE_SEPARATOR + \
                 "%03x" % filetype
     
     def find_relevant_file(self, path, suffix = None):
@@ -1495,7 +1505,7 @@ class Translate:
         
             suffix = ""
             
-        paths = [path + suffix, path + DEFAULT_SUFFIX, path + os.extsep + "*"]
+        paths = [path + suffix, path + DEFAULT_SUFFIX, path + os.extsep + "*", path + DEFAULT_FILETYPE_SEPARATOR + "*"]
         
         # Look for a file with any suffix that matches
         # the path given.
