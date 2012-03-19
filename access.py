@@ -1870,6 +1870,10 @@ class Share(Ports, Translate):
         
         if path == self.directory:
         
+            mode = self.read_mode(self.directory)
+            if mode is None or (mode & check_mode & self.mode) == 0:
+                return self.directory, None
+
             return self.directory, names
         
         # Split the path into two parts.
@@ -2347,19 +2351,19 @@ class Share(Ports, Translate):
         
         if path is None:
         
-            return None, "Not found", path
+            return None, "Not found", path, None
         
         if not os.path.isdir(path):
         
             # The path given did not refer to a directory.
-            return None, "Not a directory", path
+            return None, "Not a directory", path, None
         
         # Find whether the directory structure can be legitimately descended.
         path, rest = self.descend_path(path, check_mode = self.read_mask)
         
         if rest != []:
         
-            return None, "Access denied", path
+            return None, "Access denied", path, None
         
         try:
         
@@ -2368,7 +2372,7 @@ class Share(Ports, Translate):
         
         except OSError:
         
-            return None, "Not found", path
+            return None, "Not found", path, None
         
         # Write the catalogue information.
         
