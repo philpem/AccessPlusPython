@@ -3836,6 +3836,7 @@ class Peer(Ports):
         
         # Keep a cache for the directory catalogue
         self.catalogue_cache = {}
+        self.cache_send_info = {}
 
         # Create lists of messages sent to each listening socket.
         
@@ -5677,38 +5678,57 @@ class Peer(Ports):
         
         elif (command == "A" or command == "B") and code == 0xd:
         
-            # FIXME: this only handles 1 chunk of directory correctly
-            # I must get wireshark trace to find out how to handle more
-            # chunks
-
             # Request for next chunk of information.
             # Request is in the form: "B"+reply_id+0x0d 0x00 0x00 0x00
             # 4 bytes directory handle
-            # 4 bytes something (0x55 in my trace.  Request handle?)
-            # 4 bytes offset (or chunk size?)
+            # 4 bytes something (0x55 in my trace.  Toggle for the next chunk)
+            # 4 bytes chunk size
             
             dir_handle = self.str2num(4, data[8:12])
             something = self.str2num(4, data[12:16])
-            offset = self.str2num(4, data[16:20])
+            blocksize = self.str2num(4, data[16:20])
+
+            try:
+                sent_chunk_info = self.cache_send_info[(dir_handle, address)]
+                if sent_chunk_info[1] != something:
+                    # already sent this chunk
+                    return
+                else:
+                    chunk_no = sent_chunk_info[0] + 1
+            except KeyError:
+                chunk_no = 1
+                sent_chunk_info = [chunk_no, something]
 
             try:
                 infolist = self.catalogue_cache[(dir_handle, address)]
 
-                info = infolist[offset/2048]
+                info = infolist[chunk_no]
                 infolen = info[0]
 
-                # Assume there are chunks to read
-#                marker = 0x55000000L
-                # Until I can work out how to return more than 1 chunk,
-                # pretend this is the last chunk
-                # The user won't see all the contents of the directory,
-                # but RISC OS won't hang.
-                marker = 0xffffffffL
+                # I think the marker should alternate between
+                # 0x55000000L and 0xaa000000L.  It should be the opposite
+                # of the 'something' field
+                if something == 0xaa000000L:
+                    marker = 0x55000000L
+                elif something == 0x000000aaL:
+                    marker = 0x00000055L
+                elif something == 0x00000055L:
+                    marker = 0x000000aaL
+                else:
+                    marker = 0xaa000000L
 
-                if offset/2048 == len(infolist) - 1:
+                if chunk_no == len(infolist) - 1:
                     # This is the last chunk.
-                    self.catalogue_cache[(dir_handle, address)] = None
+                    del self.catalogue_cache[(dir_handle, address)]
+                    try:
+                        del self.cache_send_info[(dir_handle, address)]
+                    except KeyError:
+                        pass
                     marker = 0xffffffffL
+                else:
+                    sent_chunk_info[0] = chunk_no
+                    sent_chunk_info[1] = marker
+                    self.cache_send_info[(dir_handle, address)] = sent_chunk_info
 
                 trailer = [
                     infolen,
