@@ -147,6 +147,30 @@ if at != -1:
 
     Hostname = Hostname[:at]
 
+# Keep track of usable handles
+available_handles = []
+max_available_handle = 3
+
+def get_next_handle():
+    global available_handles, max_available_handle
+
+    if len(available_handles) == 0:
+        max_available_handle = max_available_handle + 1
+        handle = max_available_handle
+    else:
+        handle = available_handles.pop()
+
+    return handle
+
+def free_handle(handle):
+    global available_handles, max_available_handle
+ 
+    try:
+        if available_handles.index(handle) == -1:
+           available_handles.push(handle)
+    except ValueError:
+        pass
+
 def round_up(val, up_to):
     return (val + up_to - 1) & ~(up_to - 1)
 
@@ -1648,8 +1672,10 @@ class Translate:
         
         return path
     
-    def read_path_info(self, path):
+    def read_path_info(self, path, Need_handle = 0):
     
+        handle = None
+
         # Determine the file's relevant filetype and
         # date words.
         filetype, date = self.make_riscos_filetype_date(path)
@@ -1670,8 +1696,10 @@ class Translate:
         object_type = self.to_riscos_objtype(path = path)
         
         # Use the inode of the file as its handle.
-        handle = os.stat(path)[os.path.stat.ST_INO]# & 0xffffff7f
-        
+#        handle = os.stat(path)[os.path.stat.ST_INO]# & 0xffffff7f
+        if Need_handle == 1:
+            handle = get_next_handle()
+
         return filetype, date, length, access_attr, object_type, handle
     
 
@@ -1946,7 +1974,7 @@ class Share(Ports, Translate):
             # A directory
             
             filetype, date, length, access_attr, object_type, handle = \
-                self.read_path_info(path)
+                self.read_path_info(path, Need_handle = 1)
             
             # Keep this handle for possible later use.
             if not self.file_handler.has_key(handle):
@@ -1967,7 +1995,7 @@ class Share(Ports, Translate):
             # A file
             
             filetype, date, length, access_attr, object_type, \
-                handle = self.read_path_info(path)
+                handle = self.read_path_info(path, Need_handle = 1)
             
             # Keep this handle for possible later use.
             if not self.file_handler.has_key(handle):
@@ -2078,7 +2106,7 @@ class Share(Ports, Translate):
             # A directory
             
             filetype, date, length, access_attr, object_type, \
-                handle = self.read_path_info(path)
+                handle = self.read_path_info(path, Need_handle = 1)
             
             # Keep this handle for possible later use.
             if not self.file_handler.has_key(handle):
@@ -2093,7 +2121,7 @@ class Share(Ports, Translate):
             # A file
             
             filetype, date, length, access_attr, object_type, \
-                handle = self.read_path_info(path)
+                handle = self.read_path_info(path, Need_handle = 1)
             
             # Keep this handle for possible later use.
             if not self.file_handler.has_key(handle):
@@ -2335,7 +2363,7 @@ class Share(Ports, Translate):
 
         # Construct the new details for the object.
         filetype, date, length, access_attr, object_type, \
-            handle = self.read_path_info(fh.path)
+            handle = self.read_path_info(fh.path, Need_handle = 1)
         
         # Keep the length from the original file.
         length = fh.length()
@@ -2637,7 +2665,7 @@ class Share(Ports, Translate):
         # Try to find the details of the directory.
         
         filetype, date, length, access_attr, object_type, \
-            handle = self.read_path_info(path)
+            handle = self.read_path_info(path, Need_handle = 1)
         
         # Keep this handle for possible later use.
         if not self.file_handler.has_key(handle):
@@ -4978,6 +5006,7 @@ class Peer(Ports):
             if code == 0x1:
             
                 # Open a share, directory or path.
+                # FIXME: This should open a path for reading and writing
                 
                 # Find the share and RISC OS path within it.
                 share_name, ros_path = self.read_share_path(data[12:])
@@ -5025,6 +5054,7 @@ class Peer(Ports):
             elif code == 0x2:
             
                 # Open a share, directory or path.
+                # FIXME: This should open a path for reading only
                 
                 # Find the share and RISC OS path within it.
                 share_name, ros_path = self.read_share_path(data[12:])
@@ -5296,6 +5326,7 @@ class Peer(Ports):
                         fh.close()
                     
                     del self.file_handler[handle]
+                    free_handle(handle)
                     
                     # Reply with an short message.
                     msg = ["R"+reply_id]
