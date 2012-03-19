@@ -1086,6 +1086,7 @@ class File:
     def write(self, data):
     
         self.fh.write(data)
+        self.fh.flush()
     
     def length(self):
     
