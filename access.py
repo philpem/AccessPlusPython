@@ -89,6 +89,14 @@ UNPROTECTED_WRITE = USER_WRITE | os.path.stat.S_IWGRP | os.path.stat.S_IWOTH
 
 ROS_DIR_LENGTH = 0x800
 
+# RISC OS permissions
+
+ROS_USER_READ        = 0x01
+ROS_USER_WRITE       = 0x02
+ROS_USER_EXECUTE     = 0x04
+ROS_PUBLIC_READ       = 0x10
+ROS_PUBLIC_WRITE      = 0x20
+
 # Disc share types
 SHARE_TYPE_NORMAL    = 0x00
 SHARE_TYPE_PROTECTED = 0x01
@@ -2397,6 +2405,11 @@ class Share(Ports, Translate):
             
             try:
             
+                ros_access = self.to_riscos_access(path = this_path) & self.access_attr
+                # Don't show private files
+                if (ros_access & ROS_PUBLIC_READ) == 0:
+                    continue;
+
                 # Filetype word
                 filetype, filename = \
                     self.suffix_to_filetype(file)
@@ -2436,7 +2449,7 @@ class Share(Ports, Translate):
                 
                 # Access attributes (masked by the share's access mask)
                 file_info.append(
-                    self.to_riscos_access(path = this_path) & self.access_attr
+                    ros_access
                     )
                 
                 length = length + 4
