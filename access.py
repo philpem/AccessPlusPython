@@ -3977,6 +3977,19 @@ class Peer(Ports):
 
 		The "key" parameter is the Access+ key
         
+        Access+ shares
+
+        When a share is named "<Access+>" (without quotes) in the .access
+        file, the standard Access+ shares (Apps@Hostname, Boot@Hostname)
+        will be created.  User shares are not yet created.
+
+        The line describing the Access+ shares conforms to the following syntax:
+
+        <Access+> /path_to_access_plus_dir
+
+        Apps@Hostname will be created if /path_to_access_plus_dir/Apps exists.
+        Boot@Hostname will be created if /path_to_access_plus_dir/Boot exists.
+
         Printer shares
         
         When the share is named "<Printer>" (without quotes) in the .access
@@ -4124,6 +4137,15 @@ class Peer(Ports):
                     sys.stderr.write("Could not add printer: %s\n" % name)
                     sys.stderr.flush()
             
+            elif len(values) == 2 and values[0] == "<Access+>":
+
+                sh = [("Apps", SHARE_TYPE_APP), ("Boot", SHARE_TYPE_HIDDEN | SHARE_TYPE_PROTECTED)]
+                pth = values[1]
+                for s in sh:
+                    p = pth + "/" + s[0]
+                    if os.path.isdir(p):
+                        self.add_share(s[0] + "@" + Hostname, p, 0644, 30.0, "truncate", 0xfff, 0, s[1])
+
             elif len(values) > 0:
             
                 sys.stderr.write(
@@ -5860,9 +5882,12 @@ class Peer(Ports):
     
         p = select.poll()
         p.register(self.ports[32770].fileno(), select.POLLIN)
+        p.register(self.broadcasters[32770], select.POLLIN)
         if self.access_plus == 1:
             p.register(self.ports[32771].fileno(), select.POLLIN)
+            p.register(self.broadcasters[32771], select.POLLIN)
         p.register(self.ports[49171].fileno(), select.POLLIN)
+        p.register(self.broadcasters[49171], select.POLLIN)
 
         t0 = time.time()
         
@@ -5871,11 +5896,11 @@ class Peer(Ports):
             fired = p.poll(1000) # Wait 1 second
 
             for (s, evt) in fired:
-                if s == self.ports[32770].fileno():
+                if s == self.ports[32770].fileno() or s == self.broadcasters[32770].fileno():
                     self.read_poll_socket()
-                elif self.access_plus == 1 and s == self.ports[32771].fileno():
+                elif self.access_plus == 1 and (s == self.ports[32771].fileno() or s == self.broadcasters[32771].fileno()):
                     self.read_listener_socket()
-                elif s == self.ports[49171].fileno():
+                elif s == self.ports[49171].fileno() or s == self.broadcasters[49171].fileno():
                     self.read_share_socket()
             
             if (time.time() - t0) > TIDY_DELAY:
