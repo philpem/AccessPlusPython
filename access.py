@@ -5276,7 +5276,7 @@ class Peer(Ports):
                 # 4 bytes total spactotal space
                 handle = self.str2num(4, data[8:12])
 
-                msg = ["E"+reply_id, 0x163ac, "Free space not available"]
+                msg = ["E"+reply_id, 0x806c11, "Free space not available\x00"]
 
                 self._send_list(msg, _socket, address)
 
@@ -5635,7 +5635,7 @@ class Peer(Ports):
                 #  4 bytes largest creatable object most significant word
                 #  4 bytes total space least significant word
                 #  4 bytes total space most significant word
-                msg = ["E"+reply_id, 0x116c80, "Free space not available"]
+                msg = ["E"+reply_id, 0x806c11, "Free space not available\x00"]
 
                 self._send_list(msg, _socket, address)
 
