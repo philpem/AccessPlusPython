@@ -1950,6 +1950,11 @@ class Share(Ports, Translate):
         
         if ros_path == "":
         
+            # Check the permissions of the share
+            path, rest = self.descend_path(self.directory, check_mode = self.read_mask)
+            if rest == None:
+                return None, path
+
             # Return information about the share itself.
             cs = self.to_riscos_time()
             
@@ -5242,6 +5247,11 @@ class Peer(Ports):
             elif code == 0x8:
                 # Get free space
 
+                # Return message should be in the form:
+                # "R"+reply_id
+                # 4 bytes free space
+                # 4 bytes largest creatable object
+                # 4 bytes total spactotal space
                 handle = self.str2num(4, data[8:12])
 
                 msg = ["E"+reply_id, 0x163ac, "Free space not available"]
