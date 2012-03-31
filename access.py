@@ -404,8 +404,11 @@ class Common:
         # Construct the filetype and date words.
         
         # Determine the relevant filetype to use.
-        filetype, discard_filename = self.suffix_to_filetype(path)
+        filetype, loadexec, _ = self.suffix_to_filetype(path)
         
+        if loadexec != None:
+            return loadexec[0], loadexec1
+
         # The number of seconds since the last modification
         # to the file is read.
         seconds = os.stat(path)[os.path.stat.ST_MTIME]
@@ -1379,9 +1382,23 @@ class Translate:
         at = string.rfind(filename, DEFAULT_FILETYPE_SEPARATOR)
         
         if at != -1:
+            filetype = None
+            loadexec = None
             # comma separated suffix
-            filetype = string.atoi(filename[at+len(DEFAULT_FILETYPE_SEPARATOR):], 16)
-            return filetype, self.to_riscos_filename(filename[:at])
+            # FIXME: Handle files with load and exec appended, in the form
+            # ,XXXXXXXX-XXXXXXXX
+            suffix = filename[at+len(DEFAULT_FILETYPE_SEPARATOR):]
+            hyphen = string.find(suffix, '-')
+            if len(suffix) == 3:
+                filetype = string.atoi(suffix, 16)
+            elif hyphen != -1:
+                load_addr = string.atoi(suffix[:hyphen], 16)
+                exec_addr = string.atoi(suffix[hyphen+1:], 16)
+                loadexec = (load_addr, exec_addr)
+            else:
+                filetype = DEFAULT_FILETYPE
+
+            return filetype, loadexec, self.to_riscos_filename(filename[:at])
 
         # Find the appropriate filetype to use for the filename given.
         at = string.rfind(filename, os.extsep)
@@ -1389,7 +1406,7 @@ class Translate:
         if at == -1:
         
             # No suffix: return the default filetype.
-            return DEFAULT_FILETYPE, self.to_riscos_filename(filename)
+            return DEFAULT_FILETYPE, None, self.to_riscos_filename(filename)
         
         # The suffix includes the "." character. Remove this platform's
         # separator and replace it with a ".".
@@ -1407,19 +1424,19 @@ class Translate:
                     
                         # Remove the suffix before presenting it to RISC OS.
                         return string.atoi(mapping["Hex"], 16), \
-                            self.to_riscos_filename(filename)[:at]
+                            None, self.to_riscos_filename(filename)[:at]
                     
                     else:
                     
                         return string.atoi(mapping["Hex"], 16), \
-                            self.to_riscos_filename(filename)
+                            None, self.to_riscos_filename(filename)
                    
                 except ValueError:
                 
                     # The value found was not in a valid hexadecimal
                     # representation. Return the default filetype.
                     return DEFAULT_FILETYPE, \
-                        self.to_riscos_filename(filename)
+                        None, self.to_riscos_filename(filename)
         
         # Check whether the filename included a hexadecimal suffix.
         try:
@@ -1429,17 +1446,17 @@ class Translate:
         except ValueError:
         
             # No mappings declared the suffix used.
-            return DEFAULT_FILETYPE, self.to_riscos_filename(filename)
+            return DEFAULT_FILETYPE, None, self.to_riscos_filename(filename)
         
         # A hexadecimal suffix was used.
         if self.present == "truncate":
         
             # Remove the suffix before presenting it to RISC OS.
-            return value, self.to_riscos_filename(filename)[:at]
+            return value, None, self.to_riscos_filename(filename)[:at]
         
         else:
         
-            return value, self.to_riscos_filename(filename)
+            return value, None, self.to_riscos_filename(filename)
     
     def filetype_to_suffix(self, filename, filetype):
     
@@ -2350,7 +2367,7 @@ class Share(Ports, Translate):
         if os.path.isfile(fh.path) and self.present == "truncate":
         
             # Convert the file's path to a RISC OS style filetype and path.
-            discard_filetype, ros_path = self.suffix_to_filetype(fh.path)
+            _, _, ros_path = self.suffix_to_filetype(fh.path)
             
             # Determine the correct suffix to use for the file.
             new_path = self.filetype_to_suffix(ros_path, filetype)
@@ -2456,30 +2473,37 @@ class Share(Ports, Translate):
                     continue;
 
                 # Filetype word
-                filetype, filename = \
+                filetype, loadexec, filename = \
                     self.suffix_to_filetype(file)
                 
                 # Construct the filetype and date words.
                 
                 # The number of seconds since the last modification
                 # to the file is read.
-                seconds = os.stat(this_path)[os.path.stat.ST_MTIME]
+                if loadexec == None:
+                    seconds = os.stat(this_path)[os.path.stat.ST_MTIME]
                 
-                # Convert this to the RISC OS date format.
-                cs = self.to_riscos_time(seconds = seconds)
+                    # Convert this to the RISC OS date format.
+                    cs = self.to_riscos_time(seconds = seconds)
                 
-                filetype_word = long(
-                    0xfff00000L | (filetype << 8) | \
-                    ((cs & 0xff00000000L) >> 32)
-                    )
+                    filetype_word = long(
+                        0xfff00000L | (filetype << 8) | \
+                        ((cs & 0xff00000000L) >> 32)
+                        )
                 
-                file_info.append(filetype_word)
+                    file_info.append(filetype_word)
                 
-                length = length + 4
+                    length = length + 4
                 
-                # Date word
-                file_info.append(cs & 0xffffffffL)
-                length = length + 4
+                    # Date word
+                    file_info.append(cs & 0xffffffffL)
+                    length = length + 4
+                else:
+
+                    file_info.append(loadexec[0])
+                    length = length + 4
+                    file_info.append(loadexec[1])
+                    length = length + 4
                 
                 # Length word (0x800 for directory)
                 if os.path.isdir(this_path):
@@ -3113,7 +3137,7 @@ class RemoteShare(Ports, Translate):
         
         self.log("comment", "File to put: %s" % file, "")
         
-        filetype, ros_file = self.suffix_to_filetype(file)
+        _, _, ros_file = self.suffix_to_filetype(file)
         
         self.log("comment", "Remote file: %s" % ros_file, "")
         
@@ -3352,7 +3376,7 @@ class RemoteShare(Ports, Translate):
         
         self.log("comment", "File to put: %s" % file, "")
         
-        filetype, ros_file = \
+        _, _, ros_file = \
             self.suffix_to_filetype(file)
         
         self.log("comment", "Remote file: %s" % ros_file, "")
