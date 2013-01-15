@@ -137,7 +137,7 @@ def logging_off():
 Hostname = socket.gethostname()
 
 if ETHERNET_INTERFACE != "":
-	p = subprocess.Popen(["/sbin/ifconfig", "br0:1"], stdout=subprocess.PIPE)
+	p = subprocess.Popen(["/sbin/ifconfig", ETHERNET_INTERFACE], stdout=subprocess.PIPE)
 	stdout,stderr = p.communicate()
 	stdout = stdout.replace("\n", "");
 	# Find Hostaddr
