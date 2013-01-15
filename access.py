@@ -25,9 +25,14 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
 
+ETHERNET_INTERFACE = ""
 __version__ = "0.29"
 
 import glob, os, string, socket, struct, sys, threading, time, types, select
+import subprocess
+
+if len(sys.argv) > 1:
+	ETHERNET_INTERFACE = sys.argv[1]
 
 if not os.__dict__.has_key("extsep"):
 
@@ -131,15 +136,53 @@ def logging_off():
 
 Hostname = socket.gethostname()
 
-# Convert this name into an address.
-Hostaddr = socket.gethostbyname(Hostname)
+if ETHERNET_INTERFACE != "":
+	p = subprocess.Popen(["/sbin/ifconfig", "br0:1"], stdout=subprocess.PIPE)
+	stdout,stderr = p.communicate()
+	stdout = stdout.replace("\n", "");
+	# Find Hostaddr
+	c = string.find(stdout, "inet addr")
+	if c != -1:
+		start = string.find(stdout, ":", c)
+		if start != -1:
+			end = string.find(stdout, ' ', start)
+			Hostaddr = stdout[start+1:end]
 
-# Construct a broadcast address.
-at = string.rfind(Hostaddr, ".")
-Broadcast_addr = Hostaddr[:at] + ".255"
+	# Find broadcast address
+	c = string.find(stdout, "Bcast")
+	if c != -1:
+		start = string.find(stdout, ":", c)
+		if start != -1:
+			end = string.find(stdout, " ", start)
+			Broadcast_addr = stdout[start+1:end]
 
-# Define a string to represent the local subnet.
-Subnet = Hostaddr[:at]
+	# Find Subnet
+	c = string.find(stdout, "Mask")
+	if c != -1:
+		start = string.find(stdout, ":", c)
+		if start != -1:
+			end = string.find(stdout, " ", start)
+			Netmask = stdout[start+1:end]
+			mask = string.split(Netmask, ".")
+			addr = string.split(Hostaddr, ".")
+			Subnet = ""
+			# FIXME: Deal with subnets that do not elements
+			# other than 255 or 0
+			for i in range(len(mask)):
+				if (mask[i] == "255"):
+					if (i != 0):
+						Subnet = Subnet + "."
+					Subnet = Subnet + addr[i]
+else:
+	# Convert the host name into an address.
+	Hostaddr = socket.gethostbyname(Hostname)
+
+	# Construct a broadcast address.
+	at = string.rfind(Hostaddr, ".")
+	Broadcast_addr = Hostaddr[:at] + ".255"
+
+	# Define a string to represent the local subnet.
+	Subnet = Hostaddr[:at]
 
 # Use just the hostname from the full hostname retrieved.
 
