@@ -41,3 +41,9 @@ application's shutdown sequence.
 
 Killing the process will also stop it but you may find that various threads
 are still active and sockets are still in use.
+
+Firewall
+
+access.py listens on UDP ports 32770, 32771 and 49171.  You must ensure that
+these ports are not blocked by your firewall.
+
