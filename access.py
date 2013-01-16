@@ -1946,7 +1946,8 @@ class Share(Ports, Translate):
             self._send_list(data, s, (Broadcast_addr, 32770))
             
             self.event.wait(self.delay)
-            if self.event.isSet(): return
+            if self.event.isSet():
+                break
         
         # Broadcast that the share has now been removed.
         
@@ -1957,6 +1958,8 @@ class Share(Ports, Translate):
             0x00010003, 0x00010000, 0x00010000 | len(self.name),
             self.name + chr(self.share_type)
         ]
+
+        self._send_list(data, s, (Broadcast_addr, 32770))
     
     #def notify_share_users(self, 
     
