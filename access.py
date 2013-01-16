@@ -1977,10 +1977,14 @@ class Share(Ports, Translate):
         
         if path == self.directory:
         
-            mode = self.read_mode(self.directory)
-            if mode is None or (mode & check_mode & self.mode) == 0:
-                return self.directory, None
-
+            # FIXME: Returning None here causes issues with the return
+            # statement.  At the moment, ignore the physical permissions
+            # of the directory.  This will need looking at more thoroughly
+            # mode = self.read_mode(self.directory)
+            # if mode is None or (mode & check_mode & self.mode) == 0:
+            if check_mode & self.mode == 0:
+                return self.directory, None 
+ 
             return self.directory, names
         
         # Split the path into two parts.
