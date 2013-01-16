@@ -25,14 +25,11 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
 
-ETHERNET_INTERFACE = ""
 __version__ = "0.29"
 
 import glob, os, string, socket, struct, sys, threading, time, types, select
 import subprocess
-
-if len(sys.argv) > 1:
-	ETHERNET_INTERFACE = sys.argv[1]
+import getopt
 
 if not os.__dict__.has_key("extsep"):
 
@@ -136,53 +133,15 @@ def logging_off():
 
 Hostname = socket.gethostname()
 
-if ETHERNET_INTERFACE != "":
-	p = subprocess.Popen(["/sbin/ifconfig", ETHERNET_INTERFACE], stdout=subprocess.PIPE)
-	stdout,stderr = p.communicate()
-	stdout = stdout.replace("\n", "");
-	# Find Hostaddr
-	c = string.find(stdout, "inet addr")
-	if c != -1:
-		start = string.find(stdout, ":", c)
-		if start != -1:
-			end = string.find(stdout, ' ', start)
-			Hostaddr = stdout[start+1:end]
+# Convert the host name into an address.
+Hostaddr = socket.gethostbyname(Hostname)
 
-	# Find broadcast address
-	c = string.find(stdout, "Bcast")
-	if c != -1:
-		start = string.find(stdout, ":", c)
-		if start != -1:
-			end = string.find(stdout, " ", start)
-			Broadcast_addr = stdout[start+1:end]
+# Construct a broadcast address.
+at = string.rfind(Hostaddr, ".")
+Broadcast_addr = Hostaddr[:at] + ".255"
 
-	# Find Subnet
-	c = string.find(stdout, "Mask")
-	if c != -1:
-		start = string.find(stdout, ":", c)
-		if start != -1:
-			end = string.find(stdout, " ", start)
-			Netmask = stdout[start+1:end]
-			mask = string.split(Netmask, ".")
-			addr = string.split(Hostaddr, ".")
-			Subnet = ""
-			# FIXME: Deal with subnets that do not elements
-			# other than 255 or 0
-			for i in range(len(mask)):
-				if (mask[i] == "255"):
-					if (i != 0):
-						Subnet = Subnet + "."
-					Subnet = Subnet + addr[i]
-else:
-	# Convert the host name into an address.
-	Hostaddr = socket.gethostbyname(Hostname)
-
-	# Construct a broadcast address.
-	at = string.rfind(Hostaddr, ".")
-	Broadcast_addr = Hostaddr[:at] + ".255"
-
-	# Define a string to represent the local subnet.
-	Subnet = Hostaddr[:at]
+# Define a string to represent the local subnet.
+Subnet = Hostaddr[:at]
 
 # Use just the hostname from the full hostname retrieved.
 
@@ -195,6 +154,55 @@ if at != -1:
 # Keep track of usable handles
 available_handles = []
 max_available_handle = 3
+
+def setup_net(interface):
+    global Hostaddr
+    global Broadcast_addr
+    global Subnet
+
+    Hostaddr = None
+    Broadcast_addr = None
+    Subnet = None
+
+    p = subprocess.Popen(["/sbin/ifconfig", interface], stdout=subprocess.PIPE)
+    stdout,stderr = p.communicate()
+    stdout = stdout.replace("\n", "");
+    # Find Hostaddr
+    c = string.find(stdout, "inet addr")
+    if c != -1:
+        start = string.find(stdout, ":", c)
+        if start != -1:
+            end = string.find(stdout, ' ', start)
+            Hostaddr = stdout[start+1:end]
+
+    # Find broadcast address
+    c = string.find(stdout, "Bcast")
+    if c != -1:
+        start = string.find(stdout, ":", c)
+        if start != -1:
+            end = string.find(stdout, " ", start)
+            Broadcast_addr = stdout[start+1:end]
+
+    # Find Subnet
+    c = string.find(stdout, "Mask")
+    if c != -1:
+        start = string.find(stdout, ":", c)
+        if start != -1:
+            end = string.find(stdout, " ", start)
+            Netmask = stdout[start+1:end]
+            mask = string.split(Netmask, ".")
+            addr = string.split(Hostaddr, ".")
+            Subnet = ""
+            # FIXME: Deal with subnets that do not elements
+            # other than 255 or 0
+            for i in range(len(mask)):
+               	if (mask[i] == "255"):
+                    if (i != 0):
+                        Subnet = Subnet + "."
+                    Subnet = Subnet + addr[i]
+    if Hostaddr == None or Broadcast_addr == None or Subnet == None:
+        print "Failed to find Ethernet addresses for interface", interface
+        sys.exit(1)
 
 def get_next_handle():
     global available_handles, max_available_handle
@@ -6371,13 +6379,18 @@ if __name__ == "__main__":
     # from a suitable .access configuration file.
     sys.stdout.write("Starting...\n")
     
-    if "--no-access-plus" in sys.argv:
+    want_access_plus = 1
+    try:
+        optlist, args = getopt.gnu_getopt(sys.argv[1:], "i:", ["interface=", "no-access-plus"])
+    	for o, a in optlist:
+    	    if o in ("-i", "--interface"):
+    	        setup_net(a)
+    	    elif o == "--no-access-plus":
+    	        want_access_plus = 0
+    except getopt.GetoptError, err:
+        print err
     
-        p = Peer(access_plus = 0)
-    
-    else:
-    
-        p = Peer()
+    p = Peer(access_plus = want_access_plus)
     
     DEBUG = 0
     
