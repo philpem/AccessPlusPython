@@ -2,5 +2,4 @@
 2.  Setting file's filetype or date stamp fails from RISC OS 5 filer.
 3.  Set access to "Protected", then setting access to anything else gives a "not found" error.
 4.  Command A, Code 1 opens a file for reading and writing, Code 2 should open for reading only
-5.  Attempting to open a file that the user running access.py doesn't have read access to crashes access.py.
-6.  access.py needs to notify clients when a directory has changed.
+5.  access.py needs to notify clients when a directory has changed.

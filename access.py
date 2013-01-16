@@ -2088,7 +2088,13 @@ class Share(Ports, Translate):
             # Keep this handle for possible later use.
             if not self.file_handler.has_key(handle):
             
-                self.file_handler[handle] = File(path, self, host)
+                try:
+
+                    self.file_handler[handle] = File(path, self, host)
+
+                except IOError:
+
+                    pass
             
             else:
             
@@ -2107,6 +2113,10 @@ class Share(Ports, Translate):
                     # return an error.
                     return None, path
             
+            if not self.file_handler.has_key(handle):
+
+                return None, path
+
             return [ filetype, date, length, access_attr, object_type,
                      handle ], path
         
@@ -2214,7 +2224,13 @@ class Share(Ports, Translate):
             # Keep this handle for possible later use.
             if not self.file_handler.has_key(handle):
             
-                self.file_handler[handle] = File(path, self, host)
+                try:
+
+                    self.file_handler[handle] = File(path, self, host)
+
+                except IOError:
+
+                    pass
             
             else:
             
@@ -2225,6 +2241,10 @@ class Share(Ports, Translate):
                 # Use the file object's length, if possible.
                 length = fh.length()
             
+            if not self.file_handler.has_key(handle):
+
+                return None, path
+
             return [ 0xdeaddeadL, 0xdeaddeadL, length, 0x33, object_type,
                      handle ], path
         
