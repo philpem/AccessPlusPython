@@ -1852,6 +1852,15 @@ class Share(Ports, Translate):
         # Start the thread.
         self.thread.start()
     
+    def cleanup_handles(self, host):
+
+         for handle in self.file_handler.keys():
+ 
+             if self.file_handler[handle].user == host:
+
+                 self.file_handler[handle].close()
+                 del self.file_handler[handle]
+
     def get_key(self):
         return self.key
 
@@ -4006,6 +4015,9 @@ class Peer(Ports):
         # Use an object to manage the file handles used by shares owned by
         # this Peer.
         self.file_handler = Files()
+
+        # Use an object to record all catalogued paths
+        self.catalogued_paths = {}
         
         # Maintain a dictionary of open shares, on the local host or
         # on other hosts.
@@ -4036,6 +4048,23 @@ class Peer(Ports):
             sys.stdout.write("Closing socket for port %i\n" % port)
             _socket.close()
     
+    def cleanup_handles(self, host):
+
+         for share in self.shares.values():
+
+             share.cleanup_handles(host)
+
+         for handle in self.catalogued_paths.keys():
+
+             (path, mtime, hosts) = self.catalogued_paths[handle]
+             if host in hosts:
+
+                 hosts[:] = [h for h in hosts if h != host]
+                 if len(hosts) == 0:
+
+                     del self.catalogued_paths[handle]
+
+
     def create_shares(self):
     
         """creates_shares(self)
@@ -4324,9 +4353,24 @@ class Peer(Ports):
             Hostname + self.identity
         ]
         
+        b = self.broadcasters[49171]
+ 
         while 1:
         
             self._send_list(data, s, (Broadcast_addr, 32770))
+
+            # Broadcast any directories that have been updated
+            # There must be a better way to do this.  Possibly
+            # inotify on Linux.
+            for handle in self.catalogued_paths.keys():
+
+                (path, mtime, hosts) = self.catalogued_paths[handle]
+                m = os.stat(path)[os.path.stat.ST_MTIME]
+                if (m != mtime):
+
+                    update = [0x00000046, 0x00000013, handle]
+                    self._send_list(update, b, (Broadcast_addr, 49171))
+                    self.catalogued_paths[handle] = (path, m, hosts)
             
             event.wait(delay)
             if event.isSet(): return
@@ -4963,6 +5007,13 @@ class Peer(Ports):
                 # information about the client.
                 info = data[c:c+length2]
                 
+                # A client has booted.  Clean up any handles left over
+                # from it's last boot
+                if self.clients.has_key((client_name, host)):
+
+                    del self.clients[(client_name, host)]
+                    self.cleanup_handles(host)
+
                 #print "Startup client: %s %s" % (client_name, info)
             
             elif minor == 0x0003:
@@ -4992,6 +5043,12 @@ class Peer(Ports):
                 # The string following the client name contains some
                 # information about the client.
                 info = data[c:c+length2]
+
+                # "expire" is the time when we decide the host has died.
+                # 10 mins may be a bit long
+                # FIXME: Should use time.ctime(), but that doesn't seem to
+                # work on my box
+                expire = time.time() + 600
                 
                 #print "Client available: %s %s" % (client_name, info)
                 
@@ -5000,7 +5057,12 @@ class Peer(Ports):
                 if not self.clients.has_key((client_name, host)):
                 
                     # Add an entry for the client to the dictionary.
-                    self.clients[(client_name, host)] = info
+                    self.clients[(client_name, host)] = (info, expire)
+
+                else:
+
+                    self.clients[(client_name, host)] = (info, expire)
+                    
             
             elif DEBUG == 1:
             
@@ -5012,6 +5074,15 @@ class Peer(Ports):
                 
                     print line
         
+            # Clean up any handles left over from any clients
+            # that have probably been switched off
+            for (name, host), (info, expire) in self.clients.items():
+
+                if expire < time.time():
+
+                    del self.clients[(name, host)]
+                    self.cleanup_handles(host)
+
         elif DEBUG == 1:
         
             print "From: %s:%i" % address
@@ -5755,6 +5826,20 @@ class Peer(Ports):
                 
                 if infolist is not None:
                 
+                    handle = trailer[5]
+                    if not self.catalogued_paths.has_key(handle):
+
+                        self.catalogued_paths[handle] = (path, os.stat(path)[os.path.stat.ST_MTIME], [host])
+
+                    else:
+
+                        (path, mtime, hosts) = self.catalogued_paths[handle]
+                        if not host in hosts:
+ 
+                            hosts.append(host)
+
+                        self.catalogued_paths[handle] = (path, mtime, hosts)
+
                     # Remember thes results for later
                     if len(infolist) > 1:
                         self.catalogue_cache[(handle, address)] = infolist
@@ -6133,7 +6218,7 @@ class Peer(Ports):
         
             sys.stdout.write("Type 5 (Hosts)\n")
             
-            for (name, host), info in self.clients.items():
+            for (name, host), (info, expire) in self.clients.items():
             
                 marker = [" ", "*"][host == Hostaddr]
                 
