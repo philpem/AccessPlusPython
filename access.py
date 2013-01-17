@@ -1105,7 +1105,7 @@ class ConfigError(Exception):
 
 class File:
 
-    def __init__(self, path, share, user):
+    def __init__(self, path, share, user, mode="r+w"):
     
         self.pieces = []
         self.ptr = 0
@@ -1119,11 +1119,13 @@ class File:
         
         if not os.path.exists(path):
         
-            # Create the object.
-            open(path, "wb").write("")
+            if mode == "r+w":
+
+                # Create the object.
+                open(path, "wb").write("")
         
         # Open the file.
-        self.fh = open(path, "r+w")
+        self.fh = open(path, mode)
     
     def tell(self):
     
@@ -2025,7 +2027,7 @@ class Share(Ports, Translate):
         # list of names.
         return next_path, names[1:]
     
-    def open_path(self, ros_path, host):
+    def open_path(self, ros_path, host, mode):
     
         self.log("comment", "Original path: %s" % ros_path, "")
         
@@ -2099,7 +2101,7 @@ class Share(Ports, Translate):
             
                 try:
 
-                    self.file_handler[handle] = File(path, self, host)
+                    self.file_handler[handle] = File(path, self, host, mode = mode)
 
                 except IOError:
 
@@ -2137,7 +2139,7 @@ class Share(Ports, Translate):
     def create_file(self, ros_path, host):
     
         # Try to open the corresponding file.
-        info, path = self.open_path(ros_path, host)
+        info, path = self.open_path(ros_path, host, "r+w")
         
         if ros_path == "":
         
@@ -5218,8 +5220,7 @@ class Peer(Ports):
         
             if code == 0x1:
             
-                # Open a share, directory or path.
-                # FIXME: This should open a path for reading and writing
+                # Open a share, directory or path for read only
                 
                 # Find the share and RISC OS path within it.
                 share_name, ros_path = self.read_share_path(data[12:])
@@ -5237,7 +5238,7 @@ class Peer(Ports):
                     # Pass the name of the host making this request as this
                     # information will be used to prevent other users from
                     # modifying this file while it is in use.
-                    info, path = share.open_path(ros_path, host)
+                    info, path = share.open_path(ros_path, host, "r")
                 
                 except KeyError:
                 
@@ -5266,8 +5267,7 @@ class Peer(Ports):
             
             elif code == 0x2:
             
-                # Open a share, directory or path.
-                # FIXME: This should open a path for reading only
+                # Open a share, directory or path for reading and writing
                 
                 # Find the share and RISC OS path within it.
                 share_name, ros_path = self.read_share_path(data[12:])
@@ -5281,7 +5281,7 @@ class Peer(Ports):
                 try:
                 
                     share = self.shares[(share_name, Hostaddr)]
-                    info, path = share.open_path(ros_path, host)
+                    info, path = share.open_path(ros_path, host, "r+w")
                 
                 except KeyError:
                 
