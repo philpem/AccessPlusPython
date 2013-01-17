@@ -4298,7 +4298,7 @@ class Peer(Ports):
         # The first element is the share name.
         share_name = path_elements[0]
         
-        return share_name, string.join(path_elements[1:], ".")
+        return share_name.lower(), string.join(path_elements[1:], ".")
     
     def broadcast_startup(self):
     
@@ -6285,6 +6285,8 @@ class Peer(Ports):
         to other hosts.
         """
         
+        name = name.lower()
+
         if self.shares.has_key((name, Hostaddr)):
         
             print "Share is already available: %s" % name
