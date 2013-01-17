@@ -2166,7 +2166,10 @@ class Share(Ports, Translate):
             try:
             
                 # Create an object on the local filesystem.
-                path = path + DEFAULT_SUFFIX
+                if self.present == "truncate":
+
+                    path = path + DEFAULT_SUFFIX
+
                 open(path, "wb").write("")
                 os.chmod(path, self.mode | FILE_ATTR)
             
