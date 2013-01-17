@@ -5132,11 +5132,19 @@ class Peer(Ports):
     
         self.log("received", data, address)
         
-        key = self.str2num(4, data[8:])
+        request1 = self.str2num(4, data[0:4])
+        request2 = self.str2num(4, data[4:8])
         host = address[0]
-        for s in self.shares.values():
-            if s.get_key() == key:
-                s._send_secure_share(address)
+
+        if request1 == 0x10001 and request2 == 0x10001:
+
+            key = self.str2num(4, data[8:])
+
+            for s in self.shares.values():
+	
+                if s.get_key() == key:
+	
+                    s._send_secure_share(address)
     
     def read_share_socket(self):
     
