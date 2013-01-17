@@ -4370,12 +4370,20 @@ class Peer(Ports):
             for handle in self.catalogued_paths.keys():
 
                 (path, mtime, hosts) = self.catalogued_paths[handle]
-                m = os.stat(path)[os.path.stat.ST_MTIME]
-                if (m != mtime):
+                try:
 
-                    update = [0x00000046, 0x00000013, handle]
-                    self._send_list(update, b, (Broadcast_addr, 49171))
-                    self.catalogued_paths[handle] = (path, m, hosts)
+                    m = os.stat(path)[os.path.stat.ST_MTIME]
+
+                    if (m != mtime):
+
+                        update = [0x00000046, 0x00000013, handle]
+                        self._send_list(update, b, (Broadcast_addr, 49171))
+                        self.catalogued_paths[handle] = (path, m, hosts)
+
+                except OSError:
+
+                    # The directory has probably been deleted
+                    del self.catalogued_paths[handle]
             
             event.wait(delay)
             if event.isSet(): return
