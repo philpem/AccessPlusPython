@@ -1461,7 +1461,7 @@ class Translate:
         
         # The suffix includes the "." character. Remove this platform's
         # separator and replace it with a ".".
-        suffix = "." + filename[at+len(os.extsep):]
+        suffix = "." + filename[at+len(os.extsep):].lower()
         
         # Find the suffix in the list of mappings.
         for mapping in self.mimemap:
