@@ -2619,6 +2619,10 @@ class Share(Ports, Translate):
                 if os.path.isdir(this_path):
                 
                     file_info.append(0x02)
+                    # suffix_to_filetype will have stripped any extension
+                    # from the directory.  We want to return the full
+                    # directory name, though
+                    filename = self.to_riscos_filename(file)
                 
                 else:
                 
