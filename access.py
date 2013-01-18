@@ -4829,13 +4829,19 @@ class Peer(Ports):
                     
                     if not self.shares.has_key((share_name, host)):
                     
-                        # Add the share share_name and host to the shares
-                        # dictionary.
-                        share = RemoteShare(
-                            share_name, host, messages = self.share_messages
-                            )
+                        # A race condition when setting up shares
+                        # means we can receive our share broadcast
+                        # before our share is added to the map.  Ignore
+                        # any shares from our own host
+                        if host != Hostaddr:
+
+                            # Add the share share_name and host to the shares
+                            # dictionary.
+                            share = RemoteShare(
+                                share_name, host, messages = self.share_messages
+                                )
                         
-                        self.shares[(share_name, host)] = share
+                            self.shares[(share_name, host)] = share
                 
                 elif share_type == 0x00010001:
                 
@@ -4889,12 +4895,18 @@ class Peer(Ports):
                 
                 if not self.shares.has_key((share_name, host)):
                 
-                    # Add the share name and host to the shares dictionary.
-                    share = RemoteShare(
-                        share_name, host, messages = self.share_messages
-                        )
+                    # A race condition when setting up shares
+                    # means we can receive our share broadcast
+                    # before our share is added to the map.  Ignore
+                    # any shares from our own host
+                    if host != Hostaddr:
+
+                        # Add the share name and host to the shares dictionary.
+                        share = RemoteShare(
+                            share_name, host, messages = self.share_messages
+                            )
                     
-                    self.shares[(share_name, host)] = share
+                        self.shares[(share_name, host)] = share
             
             elif DEBUG == 1:
             
