@@ -4057,7 +4057,9 @@ class Peer(Ports):
 
          for share in self.shares.values():
 
-             share.cleanup_handles(host)
+             if isinstance(share, Share):
+
+                 share.cleanup_handles(host)
 
          for handle in self.catalogued_paths.keys():
 
