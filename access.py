@@ -430,12 +430,19 @@ class Common:
         # Convert the time to the time elapsed since the Epoch (assuming
         # 1970 for this value).
         centiseconds = value - between_epochs
+        seconds = int(centiseconds / 100.0)
         
         if (value & 0xffffffff) == 0xDEADDEAD:
             return time.localtime(0)
 
+        if seconds > 0x7fffffffL or seconds < -0x7fffffffL:
+
+            # Value is out of range for 32 bit hosts.  Set date to
+            # 1st Jan 1970
+            seconds = 0
+
         # Convert this to a value in seconds and return a time tuple.
-        return time.localtime(int(centiseconds / 100.0))
+        return time.localtime(seconds)
         
     def to_riscos_time(self, ttuple = None, seconds = 0):
     
