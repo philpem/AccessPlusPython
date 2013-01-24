@@ -2023,9 +2023,6 @@ class Share(Ports, Translate):
             print "No socket to use for port %i" % 32770
             return
         
-        if (self.key != 0):
-            disc += 0x1
-
         s = self.broadcasters[32770]
         
         data = \
