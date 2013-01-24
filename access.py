@@ -30,6 +30,7 @@ __version__ = "0.29"
 import glob, os, string, socket, struct, sys, threading, time, types, select
 import subprocess
 import getopt
+import errno
 import ctypes
 
 if not os.__dict__.has_key("extsep"):
@@ -550,7 +551,13 @@ class Ports(Common):
             # Set the socket to be non-blocking.
             self._poll_s.setblocking(0)
             
-            self._poll_s.bind((Broadcast_addr, 32770))
+            if sys.platform.startswith('win32'):
+
+                self._poll_s.bind((Hostaddr, 32770))
+
+            else:
+
+                self._poll_s.bind((Broadcast_addr, 32770))
             
             Ports.broadcasters[32770] = self._poll_s
         
@@ -586,7 +593,13 @@ class Ports(Common):
             # Set the socket to be non-blocking.
             self._listen_s.setblocking(0)
             
-            self._listen_s.bind((Broadcast_addr, 32771))
+            if sys.platform.startswith('win32'):
+
+                self._listen_s.bind((Hostaddr, 32771))
+
+            else:
+
+                self._listen_s.bind((Broadcast_addr, 32771))
             
             Ports.broadcasters[32771] = self._listen_s
         
@@ -625,7 +638,13 @@ class Ports(Common):
             # Set the socket to be non-blocking.
             self._share_s.setblocking(0)
             
-            self._share_s.bind((Broadcast_addr, 49171))
+            if sys.platform.startswith('win32'):
+
+                self._share_s.bind((Hostaddr, 49171))
+
+            else:
+
+                self._share_s.bind((Broadcast_addr, 49171))
             
             Ports.broadcasters[49171] = self._share_s
         
@@ -635,7 +654,7 @@ class Ports(Common):
 
                 # Windows (tested with Windows XP) needs to use
                 # the same socket as the broadcaster and the listener
-                Ports.ports[32771] = Ports.broadcasters[32771]
+                Ports.ports[49171] = Ports.broadcasters[49171]
 
             else:
 
@@ -749,7 +768,26 @@ class Ports(Common):
         
         self.log("sent", l, to_addr)
         
-        s.sendto(self._encode(l), to_addr)
+        sent = False
+        count = 5
+
+        while sent == False and count > 0:
+
+            try:
+
+                s.sendto(self._encode(l), to_addr)
+                sent = True
+
+            except socket.error, excpt:
+
+                if excpt.errno == errno.EAGAIN or \
+                    (sys.platform.startswith('win32') and excpt.errno == errno.WSAEWOULDBLOCK):
+
+                    count -= 1
+
+            except:
+
+                break
     
     def _expect_reply(self, _socket, msg, host, new_id, commands,
                       tries = 5, delay = 2):
