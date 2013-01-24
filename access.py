@@ -542,15 +542,23 @@ class Ports(Common):
         
         if self.ports[32770] is None:
         
-            # Create a socket for listening.
-            self._poll_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            if sys.platform.startswith('win32'):
+
+                # Windows (tested with Windows XP) needs to use
+                # the same socket as the broadcaster and the listener
+                Ports.ports[32770] = Ports.broadcasters[32770]
+
+            else:
+
+                # Create a socket for listening.
+                self._poll_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             
-            # Set the socket to be non-blocking.
-            self._poll_l.setblocking(0)
+                # Set the socket to be non-blocking.
+                self._poll_l.setblocking(0)
             
-            self._poll_l.bind((Hostaddr, 32770))
+                self._poll_l.bind((Hostaddr, 32770))
             
-            Ports.ports[32770] = self._poll_l
+                Ports.ports[32770] = self._poll_l
     
     def _create_listener_sockets(self):
     
@@ -570,15 +578,26 @@ class Ports(Common):
         
         if self.ports[32771] is None:
         
-            # Create a socket for listening.
-            self._listen_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            if sys.platform.startswith('win32'):
+
+                # Windows (tested with Windows XP) needs to use
+                # the same socket as the broadcaster and the listener
+                Ports.ports[32771] = Ports.broadcasters[32771]
+
+            else:
+
+                # Linux either needs separate sockets for broadcaster
+                # and listener, or it needs to bind to Hostaddr ''
+                # otherwise it will totally fail to receive broadcast messages
+                # Create a socket for listening.
+                self._listen_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             
-            # Set the socket to be non-blocking.
-            self._listen_l.setblocking(0)
+                # Set the socket to be non-blocking.
+                self._listen_l.setblocking(0)
             
-            self._listen_l.bind((Hostaddr, 32771))
+                self._listen_l.bind((Hostaddr, 32771))
             
-            Ports.ports[32771] = self._listen_l
+                Ports.ports[32771] = self._listen_l
     
     def _create_share_sockets(self):
     
@@ -598,15 +617,23 @@ class Ports(Common):
         
         if self.ports[49171] is None:
         
-            # Create a socket for listening.
-            self._share_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            if sys.platform.startswith('win32'):
+
+                # Windows (tested with Windows XP) needs to use
+                # the same socket as the broadcaster and the listener
+                Ports.ports[32771] = Ports.broadcasters[32771]
+
+            else:
+
+                # Create a socket for listening.
+                self._share_l = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             
-            # Set the socket to be non-blocking.
-            self._share_l.setblocking(0)
+                # Set the socket to be non-blocking.
+                self._share_l.setblocking(0)
             
-            self._share_l.bind((Hostaddr, 49171))
+                self._share_l.bind((Hostaddr, 49171))
             
-            Ports.ports[49171] = self._share_l
+                Ports.ports[49171] = self._share_l
     
     def _encode(self, l):
     
@@ -4052,10 +4079,14 @@ class Peer(Ports):
             sys.stdout.write("Closing socket for port %i\n" % port)
             _socket.close()
         
-        for port, _socket in self.ports.items():
+        # On Windows, port sockets are a copy of broadcast sockets,
+        # so don't bother to close them
+        if not sys.platform.startswith('win32'):
+
+            for port, _socket in self.ports.items():
         
-            sys.stdout.write("Closing socket for port %i\n" % port)
-            _socket.close()
+                sys.stdout.write("Closing socket for port %i\n" % port)
+                _socket.close()
     
     def cleanup_handles(self, host):
 
@@ -6106,12 +6137,15 @@ class Peer(Ports):
     
         p = select.poll()
         p.register(self.ports[32770].fileno(), select.POLLIN)
-        p.register(self.broadcasters[32770], select.POLLIN)
+        if self.ports[32770].fileno() != self.broadcasters[32770].fileno():
+            p.register(self.broadcasters[32770], select.POLLIN)
         if self.access_plus == 1:
             p.register(self.ports[32771].fileno(), select.POLLIN)
-            p.register(self.broadcasters[32771], select.POLLIN)
+            if self.ports[32771].fileno() != self.broadcasters[32771].fileno():
+                p.register(self.broadcasters[32771], select.POLLIN)
         p.register(self.ports[49171].fileno(), select.POLLIN)
-        p.register(self.broadcasters[49171], select.POLLIN)
+        if self.ports[49171].fileno() != self.broadcasters[49171].fileno():
+            p.register(self.broadcasters[49171], select.POLLIN)
 
         t0 = time.time()
         
