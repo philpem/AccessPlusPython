@@ -167,8 +167,8 @@ def setup_net(interface):
     Subnet = None
 
     p = subprocess.Popen(["/sbin/ifconfig", interface], stdout=subprocess.PIPE)
-    stdout,stderr = p.communicate()
-    stdout = stdout.replace("\n", "");
+    stdout, _ = p.communicate()
+    stdout = stdout.replace("\n", "")
     # Find Hostaddr
     c = string.find(stdout, "inet addr")
     if c != -1:
@@ -198,7 +198,7 @@ def setup_net(interface):
             # FIXME: Deal with subnets that do not elements
             # other than 255 or 0
             for i in range(len(mask)):
-               	if (mask[i] == "255"):
+                if (mask[i] == "255"):
                     if (i != 0):
                         Subnet = Subnet + "."
                     Subnet = Subnet + addr[i]
@@ -206,21 +206,21 @@ def setup_net(interface):
         print "Failed to find Ethernet addresses for interface", interface
         sys.exit(1)
 
-def jenkins_one_at_a_time_hash(str):
-    hash = ctypes.c_uint(0)
-    for c in str:
-        hash.value += ord(c)
-        hash.value += (hash.value << 10)
-        hash.value ^= (hash.value >> 6)
+def jenkins_one_at_a_time_hash(path):
+    hsh = ctypes.c_uint(0)
+    for c in path:
+        hsh.value += ord(c)
+        hsh.value += (hsh.value << 10)
+        hsh.value ^= (hsh.value >> 6)
 
-        hash.value += (hash.value << 3)
-        hash.value ^= (hash.value >> 11)
-        hash.value += (hash.value << 15)
+        hsh.value += (hsh.value << 3)
+        hsh.value ^= (hsh.value >> 11)
+        hsh.value += (hsh.value << 15)
 
-    return hash.value
+    return hsh.value
 
 def get_next_handle():
-    global available_handles, max_available_handle
+    global max_available_handle
 
     if len(available_handles) == 0:
         max_available_handle = max_available_handle + 1
@@ -231,11 +231,11 @@ def get_next_handle():
     return handle
 
 def free_handle(handle):
-    global available_handles, max_available_handle
+    global available_handles
  
     try:
         if available_handles.index(handle) == -1:
-           available_handles.push(handle)
+            available_handles.push(handle)
     except ValueError:
         pass
 
@@ -1974,12 +1974,12 @@ class Share(Ports, Translate):
     
     def cleanup_handles(self, host):
 
-         for handle in self.file_handler.keys():
+        for handle in self.file_handler.keys():
  
-             if self.file_handler[handle].user == host:
+            if self.file_handler[handle].user == host:
 
-                 self.file_handler[handle].close()
-                 del self.file_handler[handle]
+                self.file_handler[handle].close()
+                del self.file_handler[handle]
 
     def get_key(self):
         return self.key
@@ -4189,21 +4189,21 @@ class Peer(Ports):
     
     def cleanup_handles(self, host):
 
-         for share in self.shares.values():
+        for share in self.shares.values():
 
-             if isinstance(share, Share):
+            if isinstance(share, Share):
 
-                 share.cleanup_handles(host)
+                share.cleanup_handles(host)
 
-         for handle in self.catalogued_paths.keys():
+        for handle in self.catalogued_paths.keys():
 
-             (path, mtime, hosts) = self.catalogued_paths[handle]
-             if host in hosts:
+            (path, mtime, hosts) = self.catalogued_paths[handle]
+            if host in hosts:
 
-                 hosts[:] = [h for h in hosts if h != host]
-                 if len(hosts) == 0:
+                hosts[:] = [h for h in hosts if h != host]
+                if len(hosts) == 0:
 
-                     del self.catalogued_paths[handle]
+                    del self.catalogued_paths[handle]
 
 
     def create_shares(self):
@@ -6765,11 +6765,11 @@ if __name__ == "__main__":
     want_access_plus = 1
     try:
         optlist, args = getopt.gnu_getopt(sys.argv[1:], "i:", ["interface=", "no-access-plus"])
-    	for o, a in optlist:
-    	    if o in ("-i", "--interface"):
-    	        setup_net(a)
-    	    elif o == "--no-access-plus":
-    	        want_access_plus = 0
+        for o, a in optlist:
+            if o in ("-i", "--interface"):
+                setup_net(a)
+            elif o == "--no-access-plus":
+                want_access_plus = 0
     except getopt.GetoptError, err:
         print err
     
