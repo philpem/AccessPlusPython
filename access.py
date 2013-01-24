@@ -1994,6 +1994,7 @@ class Share(Ports, Translate):
             print "No socket to use for port %i" % 32771
             return
         
+        # FIXME: should this be broadcasters or ports?
         s = self.broadcasters[32771]
         
         data = \
@@ -2004,7 +2005,6 @@ class Share(Ports, Translate):
         ]
         
         self._send_list(data, s, dest)
-        
 
     def broadcast_share(self):
     
@@ -4159,6 +4159,10 @@ class Peer(Ports):
         # the name of the share and the host it resides on and contains the
         # ID value used to open it.
         self.open_shares = {}
+
+        # Maintain a dictionary of usernames we have logged on as
+        # Each entry contains the password key
+        self.access_users = {}
         
         # Start serving.
         self.serve()
@@ -4499,6 +4503,11 @@ class Peer(Ports):
         
             self._send_list(data, s, (Broadcast_addr, 32770))
 
+            # Find any secure shares on the network
+            for u, k in self.access_users.iteritems():
+
+                self._request_secure_share(k)
+
             # Broadcast any directories that have been updated
             # There must be a better way to do this.  Possibly
             # inotify on Linux.
@@ -4592,7 +4601,22 @@ class Peer(Ports):
         [
             0x00010003, 0x00010001, 0x00000000
         ]
-    
+
+    def _request_secure_share(self, key):
+        
+        """_request_secure_share(self, key)
+        Ask peers for any secure shares with password matching the supplied key
+        """
+
+        s = self.broadcasters[32771]
+ 
+        data = \
+        [
+            0x00010001, 0x00010001, key
+        ]
+
+        self._send_list(data, s, (Broadcast_addr, 32771))
+
     def send_query(self, host):
     
         if not self.broadcasters.has_key(32770):
@@ -5009,12 +5033,44 @@ class Peer(Ports):
             
             elif minor == 0x0004:
             
-                # Share periodic broadcast
-                
-                # A string follows the leading three words.
-                share_name = data[12:12+length1]
-                
-                c = 12 + length1
+                # Share periodic broadcast, or response to a logon
+ 
+                key = 0
+                valid_key = True
+
+                if share_type == 0x00010000:
+
+                    name_offset = 12
+
+                elif share_type == 0x00010001:
+
+                    # A key follows the leading three words.
+                    key = self.str2num(4, data[12:16])
+                    for u, k in self.access_users.iteritems():
+
+                        if k == key:
+
+                            valid_key = False
+                            break
+
+                    name_offset = 16
+
+
+                # A string follows key or the leading 3 words
+                share_name = data[name_offset:name_offset+length1]
+ 
+                valid_share = True
+                if key != 0 and valid_key == True:
+
+                    valid_share = False
+                    for u in self.access_users.keys():
+
+                        if share_name.startswith(u + '@'):
+
+                            valid_share = True
+                            break
+
+                c = name_offset + length1
                 
                 # The protected flag follows the last byte in the string.
                 protected = self.str2num(length2, data[c:c+length2])
@@ -5026,7 +5082,7 @@ class Peer(Ports):
                 
                 # Compare the share with those recorded.
                 
-                if not self.shares.has_key((share_name, host)):
+                if valid_share and not self.shares.has_key((share_name, host)):
                 
                     # A race condition when setting up shares
                     # means we can receive our share broadcast
@@ -5173,6 +5229,7 @@ class Peer(Ports):
 
                     del self.clients[(client_name, host)]
                     self.cleanup_handles(host)
+                    # FIXME: delete any shares owned by this host as well
 
                 #print "Startup client: %s %s" % (client_name, info)
             
@@ -5242,6 +5299,7 @@ class Peer(Ports):
 
                     del self.clients[(name, host)]
                     self.cleanup_handles(host)
+                    # FIXME: delete any shares owned by this host as well
 
         elif DEBUG == 1:
         
@@ -5305,6 +5363,10 @@ class Peer(Ports):
                 if s.get_key() == key:
 	
                     s._send_secure_share(address)
+
+        else:
+
+            self._read_poll_socket(data, address)
     
     def read_share_socket(self):
     
@@ -6389,6 +6451,34 @@ class Peer(Ports):
         
         sys.stdout.write("Finished\n")
     
+    def logon(self, username, key):
+
+        """logon(self, username, key)
+        Logon to Access+
+        """
+
+        if not self.access_users.has_key(username):
+
+            self.access_users[username] = int(key, base=16)
+
+            self._request_secure_share(self.access_users[username])
+
+
+    def logoff(self, username):
+
+        """logoff(self, username)
+        Logoff from Access+
+        """
+
+        if self.access_users.has_key(username):
+
+            del self.access_users[username]
+            for (name, host) in self.shares.keys():
+
+                if name.startswith(username + '@'):
+
+                    del self.shares[(name, host)]
+
     def fwshow(self):
     
         """fwshow(self)
