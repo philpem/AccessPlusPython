@@ -30,6 +30,7 @@ __version__ = "0.29"
 import glob, os, string, socket, struct, sys, threading, time, types, select
 import subprocess
 import getopt
+import ctypes
 
 if not os.__dict__.has_key("extsep"):
 
@@ -203,6 +204,19 @@ def setup_net(interface):
     if Hostaddr == None or Broadcast_addr == None or Subnet == None:
         print "Failed to find Ethernet addresses for interface", interface
         sys.exit(1)
+
+def jenkins_one_at_a_time_hash(str):
+    hash = ctypes.c_uint(0)
+    for c in str:
+        hash.value += ord(c)
+        hash.value += (hash.value << 10)
+        hash.value ^= (hash.value >> 6)
+
+        hash.value += (hash.value << 3)
+        hash.value ^= (hash.value >> 11)
+        hash.value += (hash.value << 15)
+
+    return hash.value
 
 def get_next_handle():
     global available_handles, max_available_handle
@@ -1803,8 +1817,6 @@ class Translate:
         # Use a default value for the object type.
         object_type = self.to_riscos_objtype(path = path)
         
-        # Use the inode of the file as its handle.
-#        handle = os.stat(path)[os.path.stat.ST_INO]# & 0xffffff7f
         if Need_handle == 1:
             handle = get_next_handle()
 
@@ -2700,8 +2712,8 @@ class Share(Ports, Translate):
         # open request but with a "B" command word like a
         # catalogue request.
         
-        # Use the inode of the directory as its handle.
-        handle = os.stat(path)[os.path.stat.ST_INO] & 0xffffffffL
+        # Use a hash value for the handle
+        handle = jenkins_one_at_a_time_hash(path)
         
         share_value = (handle & 0xffffff00L) ^ 0xffffff02L
         
