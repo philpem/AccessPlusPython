@@ -2557,7 +2557,7 @@ class Share(Ports, Translate):
         
             pass
     
-    def set_filetype(self, fh, filetype_word, date_word):
+    def set_filetype(self, fh, handle, filetype_word, date_word):
     
         # Find the filetype and date from the words given.
         filetype, date = \
@@ -2596,7 +2596,7 @@ class Share(Ports, Translate):
 
         # Construct the new details for the object.
         filetype, date, length, access_attr, object_type, \
-            handle = self.read_path_info(fh.path, Need_handle = 1)
+            hnd = self.read_path_info(fh.path, Need_handle = 0)
         
         # Keep the length from the original file.
         length = fh.length()
@@ -3894,7 +3894,14 @@ class RemoteShare(Ports, Translate):
         
         if replied != 1:
         
-            return
+            # RISC OS 5 always returns a "Not Found" error.  I don't know why.
+            if replied == -1 and data[1].startswith("Not found"):
+
+                pass
+
+            else:
+
+                return
         
         self._close(info["handle"])
     
@@ -5917,16 +5924,22 @@ class Peer(Ports):
                     # to modify the file's attributes.
                     share = fh.share
                     
-                    del self.file_handler[handle]
+                    # The handle doesn't change, so don't delete the
+                    # file_handler data.
+                    #del self.file_handler[handle]
                     
-                    info = share.set_filetype(fh, filetype_word, date_word)
+                    info = share.set_filetype(fh, handle, filetype_word, date_word)
                     
                     if info is not None:
                     
-                        handle = info[-1]
+                        # I don't think the last element of this list is
+                        # a handle.  I'm not sure what it is, though - and
+                        # I can't see it referenced ever.
+                        # RISC OS 5 always returns a "Not Found" error.
+                        # handle = info[-1]
                         
-                        # Transfer the file handle to the file on the new path.
-                        self.file_handler[handle] = fh
+                        ## Transfer the file handle to the file on the new path.
+                        #self.file_handler[handle] = fh
                         
                         # Construct a reply.
                         msg = [ "R"+reply_id ] + info
