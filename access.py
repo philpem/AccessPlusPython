@@ -6135,32 +6135,69 @@ class Peer(Ports):
     
     def listen(self, event):
     
-        p = select.poll()
-        p.register(self.ports[32770].fileno(), select.POLLIN)
-        if self.ports[32770].fileno() != self.broadcasters[32770].fileno():
-            p.register(self.broadcasters[32770], select.POLLIN)
-        if self.access_plus == 1:
-            p.register(self.ports[32771].fileno(), select.POLLIN)
-            if self.ports[32771].fileno() != self.broadcasters[32771].fileno():
-                p.register(self.broadcasters[32771], select.POLLIN)
-        p.register(self.ports[49171].fileno(), select.POLLIN)
-        if self.ports[49171].fileno() != self.broadcasters[49171].fileno():
-            p.register(self.broadcasters[49171], select.POLLIN)
+        use_poll = False
+
+        try:
+
+            p = select.poll()
+            p.register(self.ports[32770].fileno(), select.POLLIN)
+            if self.ports[32770].fileno() != self.broadcasters[32770].fileno():
+                p.register(self.broadcasters[32770], select.POLLIN)
+            if self.access_plus == 1:
+                p.register(self.ports[32771].fileno(), select.POLLIN)
+                if self.ports[32771].fileno() != self.broadcasters[32771].fileno():
+                    p.register(self.broadcasters[32771], select.POLLIN)
+            p.register(self.ports[49171].fileno(), select.POLLIN)
+            if self.ports[49171].fileno() != self.broadcasters[49171].fileno():
+                p.register(self.broadcasters[49171], select.POLLIN)
+            use_poll = True
+
+        except:
+
+            # Poll not supported on this platform
+            pass
 
         t0 = time.time()
         
         while 1:
         
-            fired = p.poll(1000) # Wait 1 second
+            if use_poll == True:
 
-            for (s, evt) in fired:
-                if s == self.ports[32770].fileno() or s == self.broadcasters[32770].fileno():
-                    self.read_poll_socket()
-                elif self.access_plus == 1 and (s == self.ports[32771].fileno() or s == self.broadcasters[32771].fileno()):
-                    self.read_listener_socket()
-                elif s == self.ports[49171].fileno() or s == self.broadcasters[49171].fileno():
-                    self.read_share_socket()
+                fired = p.poll(1000) # Wait 1 second
+
+                for (s, evt) in fired:
+                    if s == self.ports[32770].fileno() or s == self.broadcasters[32770].fileno():
+                        self.read_poll_socket()
+                    elif self.access_plus == 1 and (s == self.ports[32771].fileno() or s == self.broadcasters[32771].fileno()):
+                        self.read_listener_socket()
+                    elif s == self.ports[49171].fileno() or s == self.broadcasters[49171].fileno():
+                        self.read_share_socket()
             
+            else:
+
+
+                rlist = [self.ports[32770].fileno(), \
+                         self.ports[32771].fileno(), \
+                         self.ports[49171].fileno()]
+
+                if self.ports[32770].fileno() != self.broadcasters[32770].fileno():
+                    rlist.append(self.broadcasters[32770].fileno())
+                    rlist.append(self.broadcasters[32771].fileno())
+                    rlist.append(self.broadcasters[49171].fileno())
+
+                (rports, wports, xports) = select.select(rlist, [], [], 1.0)
+
+                for i in rports:
+                    if i == self.ports[32770].fileno() or \
+                       i == self.broadcasters[32770].fileno():
+                        self.read_poll_socket()
+                    if i == self.ports[32771].fileno() or \
+                       i == self.broadcasters[32771].fileno():
+                        self.read_listener_socket()
+                    if i == self.ports[49171].fileno() or \
+                       i == self.broadcasters[49171].fileno():
+                        self.read_share_socket()
+
             if (time.time() - t0) > TIDY_DELAY:
             
                 # Reset the timer and prune the list of transfers.
