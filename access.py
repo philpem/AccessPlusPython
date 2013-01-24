@@ -1436,10 +1436,15 @@ class ShareError(Exception):
 
 class Translate:
 
+    present = None
+    directory = None
+
     def __init__(self, directory = None):
     
+        self.directory = directory
+
         # Look for a MimeMap file in the path used to invoke this program.
-        path, file = os.path.split(sys.argv[0])
+        path, _ = os.path.split(sys.argv[0])
         
         paths = [ "MimeMap",
                   os.path.join(path, "MimeMap") ]
