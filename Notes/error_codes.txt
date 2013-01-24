@@ -1,0 +1,6 @@
+0x000100d6: Not found
+0x000117c3: This item is locked to stop changes being made to it
+0x000163ac: Shared disc not available
+0x000163bd: Access Violation (read only directory)
+0x000163c5: Not a Directory
+0x00806c11: Free space not available
