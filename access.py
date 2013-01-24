@@ -508,6 +508,10 @@ class Ports(Common):
     # only defined once.
     broadcasters = {32770: None, 32771: None, 49171: None}
     ports = {32770: None, 32771: None, 49171: None}
+
+    # structures to handle data for select.poll() or select.select()
+    socket_poll = None
+    socket_select_rlist = None
     
     access_plus = None
     
@@ -524,6 +528,14 @@ class Ports(Common):
             Ports.access_plus = access_plus
         
         
+        try:
+
+            self.socket_poll = select.poll()
+
+        except:
+
+            self.socket_select_rlist = []
+
         # Create sockets to use for polling.
         self._create_poll_sockets()
         
@@ -539,6 +551,16 @@ class Ports(Common):
         
         if DEBUG == 1 and not hasattr(self, "_log"): Ports._log = []
     
+    def _register_socket_for_select(self, s):
+
+        if self.socket_poll != None:
+
+            self.socket_poll.register(s.fileno(), select.POLLIN)
+
+        else:
+
+            self.socket_select_rlist.append(s.fileno())
+
     def _create_poll_sockets(self):
     
         if self.broadcasters[32770] is None:
@@ -560,6 +582,8 @@ class Ports(Common):
                 self._poll_s.bind((Broadcast_addr, 32770))
             
             Ports.broadcasters[32770] = self._poll_s
+
+            self._register_socket_for_select(Ports.broadcasters[32770])
         
         if self.ports[32770] is None:
         
@@ -580,6 +604,8 @@ class Ports(Common):
                 self._poll_l.bind((Hostaddr, 32770))
             
                 Ports.ports[32770] = self._poll_l
+
+                self._register_socket_for_select(Ports.ports[32770])
     
     def _create_listener_sockets(self):
     
@@ -602,6 +628,8 @@ class Ports(Common):
                 self._listen_s.bind((Broadcast_addr, 32771))
             
             Ports.broadcasters[32771] = self._listen_s
+
+            self._register_socket_for_select(Ports.broadcasters[32771])
         
         if self.ports[32771] is None:
         
@@ -625,6 +653,8 @@ class Ports(Common):
                 self._listen_l.bind((Hostaddr, 32771))
             
                 Ports.ports[32771] = self._listen_l
+
+                self._register_socket_for_select(Ports.ports[32771])
     
     def _create_share_sockets(self):
     
@@ -647,6 +677,8 @@ class Ports(Common):
                 self._share_s.bind((Broadcast_addr, 49171))
             
             Ports.broadcasters[49171] = self._share_s
+
+            self._register_socket_for_select(Ports.broadcasters[49171])
         
         if self.ports[49171] is None:
         
@@ -667,6 +699,8 @@ class Ports(Common):
                 self._share_l.bind((Hostaddr, 49171))
             
                 Ports.ports[49171] = self._share_l
+
+                self._register_socket_for_select(Ports.ports[49171])
     
     def _encode(self, l):
     
@@ -6185,35 +6219,13 @@ class Peer(Ports):
     
     def listen(self, event):
     
-        use_poll = False
-
-        try:
-
-            p = select.poll()
-            p.register(self.ports[32770].fileno(), select.POLLIN)
-            if self.ports[32770].fileno() != self.broadcasters[32770].fileno():
-                p.register(self.broadcasters[32770], select.POLLIN)
-            if self.access_plus == 1:
-                p.register(self.ports[32771].fileno(), select.POLLIN)
-                if self.ports[32771].fileno() != self.broadcasters[32771].fileno():
-                    p.register(self.broadcasters[32771], select.POLLIN)
-            p.register(self.ports[49171].fileno(), select.POLLIN)
-            if self.ports[49171].fileno() != self.broadcasters[49171].fileno():
-                p.register(self.broadcasters[49171], select.POLLIN)
-            use_poll = True
-
-        except:
-
-            # Poll not supported on this platform
-            pass
-
         t0 = time.time()
         
         while 1:
         
-            if use_poll == True:
+            if self.socket_poll != None:
 
-                fired = p.poll(1000) # Wait 1 second
+                fired = self.socket_poll.poll(1000) # Wait 1 second
 
                 for (s, evt) in fired:
                     if s == self.ports[32770].fileno() or s == self.broadcasters[32770].fileno():
@@ -6226,16 +6238,8 @@ class Peer(Ports):
             else:
 
 
-                rlist = [self.ports[32770].fileno(), \
-                         self.ports[32771].fileno(), \
-                         self.ports[49171].fileno()]
-
-                if self.ports[32770].fileno() != self.broadcasters[32770].fileno():
-                    rlist.append(self.broadcasters[32770].fileno())
-                    rlist.append(self.broadcasters[32771].fileno())
-                    rlist.append(self.broadcasters[49171].fileno())
-
-                (rports, wports, xports) = select.select(rlist, [], [], 1.0)
+                (rports, _, _) = select.select(self.socket_select_rlist, \
+                                                         [], [], 1.0)
 
                 for i in rports:
                     if i == self.ports[32770].fileno() or \
