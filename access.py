@@ -480,7 +480,7 @@ class Common:
         filetype, loadexec, _ = self.suffix_to_filetype(path)
         
         if loadexec != None:
-            return loadexec[0], loadexec1
+            return loadexec[0], loadexec[1]
 
         # The number of seconds since the last modification
         # to the file is read.
