@@ -1146,7 +1146,7 @@ class ConfigError(Exception):
 
 class File:
 
-    def __init__(self, path, share, user, mode="r+w"):
+    def __init__(self, path, share, user, mode="r+b"):
     
         self.pieces = []
         self.ptr = 0
@@ -1160,7 +1160,7 @@ class File:
         
         if not os.path.exists(path):
         
-            if mode == "r+w":
+            if mode == "r+b":
 
                 # Create the object.
                 open(path, "wb").write("")
@@ -2178,7 +2178,7 @@ class Share(Ports, Translate):
     def create_file(self, ros_path, host):
     
         # Try to open the corresponding file.
-        info, path = self.open_path(ros_path, host, "r+w")
+        info, path = self.open_path(ros_path, host, "r+b")
         
         if ros_path == "":
         
@@ -5350,7 +5350,7 @@ class Peer(Ports):
                 try:
                 
                     share = self.shares[(share_name, Hostaddr)]
-                    info, path = share.open_path(ros_path, host, "r+w")
+                    info, path = share.open_path(ros_path, host, "r+b")
                 
                 except KeyError:
                 
