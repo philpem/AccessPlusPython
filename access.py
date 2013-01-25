@@ -5040,11 +5040,7 @@ class Peer(Ports):
                 key = 0
                 valid_key = True
 
-                if share_type == 0x00010000:
-
-                    name_offset = 12
-
-                elif share_type == 0x00010001:
+                if share_type & 0x0001:
 
                     # A key follows the leading three words.
                     key = self.str2num(4, data[12:16])
@@ -5056,6 +5052,10 @@ class Peer(Ports):
                             break
 
                     name_offset = 16
+
+                else:
+
+                    name_offset = 12
 
 
                 # A string follows key or the leading 3 words
