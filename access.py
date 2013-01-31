@@ -4154,6 +4154,7 @@ class Peer(Ports):
 
         # Use an object to record all catalogued paths
         self.catalogued_paths = {}
+        self.catalogued_paths_lock = threading.Lock()
         
         # Maintain a dictionary of open shares, on the local host or
         # on other hosts.
@@ -4200,15 +4201,16 @@ class Peer(Ports):
 
                 share.cleanup_handles(host)
 
-        for handle in self.catalogued_paths.keys():
+        for handle, (path, mtime, hosts) in self.catalogued_paths.items():
 
-            (path, mtime, hosts) = self.catalogued_paths[handle]
             if host in hosts:
 
                 hosts[:] = [h for h in hosts if h != host]
                 if len(hosts) == 0:
 
+                    self.catalogued_paths_lock.acquire()
                     del self.catalogued_paths[handle]
+                    self.catalogued_paths_lock.release()
 
 
     def create_shares(self):
@@ -4513,9 +4515,8 @@ class Peer(Ports):
             # Broadcast any directories that have been updated
             # There must be a better way to do this.  Possibly
             # inotify on Linux.
-            for handle in self.catalogued_paths.keys():
+            for handle, (path, mtime, hosts) in self.catalogued_paths.items():
 
-                (path, mtime, hosts) = self.catalogued_paths[handle]
                 try:
 
                     m = os.stat(path)[os.path.stat.ST_MTIME]
@@ -4524,12 +4525,21 @@ class Peer(Ports):
 
                         update = [0x00000046, 0x00000013, handle]
                         self._send_list(update, b, (Broadcast_addr, 49171))
-                        self.catalogued_paths[handle] = (path, m, hosts)
+                        self.catalogued_paths_lock.acquire()
+
+                        if handle in self.catalogued_paths:
+
+                            # Don't re-add if this has just been deleted
+                            self.catalogued_paths[handle] = (path, m, hosts)
+
+                        self.catalogued_paths_lock.release()
 
                 except OSError:
 
                     # The directory has probably been deleted
+                    self.catalogued_paths_lock.acquire()
                     del self.catalogued_paths[handle]
+                    self.catalogued_paths_lock.release()
             
             event.wait(delay)
             if event.isSet(): return
@@ -6109,6 +6119,7 @@ class Peer(Ports):
                 if infolist is not None:
                 
                     handle = trailer[5]
+                    self.catalogued_paths_lock.acquire()
                     if not self.catalogued_paths.has_key(handle):
 
                         self.catalogued_paths[handle] = (path, os.stat(path)[os.path.stat.ST_MTIME], [host])
@@ -6121,6 +6132,7 @@ class Peer(Ports):
                             hosts.append(host)
 
                         self.catalogued_paths[handle] = (path, mtime, hosts)
+                    self.catalogued_paths_lock.release()
 
                     # Remember thes results for later
                     if len(infolist) > 1:
