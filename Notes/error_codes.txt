@@ -1,3 +1,4 @@
+0x000000c1: Not open for update
 0x000100d6: Not found
 0x000117c3: This item is locked to stop changes being made to it
 0x000163ac: Shared disc not available

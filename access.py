@@ -4416,7 +4416,7 @@ class Peer(Ports):
             
             elif len(values) == 2 and values[0] == "<Access+>":
 
-                sh = [("Apps", SHARE_TYPE_APP), ("Boot", SHARE_TYPE_HIDDEN | SHARE_TYPE_PROTECTED)]
+                sh = [("Apps", SHARE_TYPE_APP), ("Boot", SHARE_TYPE_HIDDEN | SHARE_TYPE_PROTECTED), ("cdrom", SHARE_TYPE_CDROM), ("dir", SHARE_TYPE_DIRECTORY)]
                 pth = values[1]
                 for s in sh:
                     p = pth + "/" + s[0]
@@ -6030,7 +6030,53 @@ class Peer(Ports):
                 # Send a reply.
                 self._send_list(msg, _socket, address)
 
-        
+            elif code == 0x14:
+
+                # Ensure size.  Fill space with zeros?
+                # This is the same as codes 0xe and 0xf, but with an offset argument
+
+                handle = self.str2num(4, data[8:12])
+                offset = self.str2num(4, data[12:16])
+                length = self.str2num(4, data[16:20])
+                new_length = offset + length
+
+                try:
+                    # Find the path and previously recorded file length.
+                    fh = self.file_handler[handle]
+                    
+                    # Only allow the user of the file to set the length.
+                    if fh.user != host: raise KeyError
+                    
+                    # Find the current file length.
+                    length = fh.length()
+                    
+                    self.log(
+                        "comment",
+                        "Change length from %i to %i" % (length, new_length), ""
+                        )
+                    
+                    # If the length is to be changed then open the file for
+                    # changing.
+                    if length < new_length:
+                    
+                        fh.truncate(new_length)
+                    
+                    msg = ["R"+reply_id, new_length]
+                
+                except IOError:
+                
+                    msg = ["E"+reply_id, 0x100d6, "Not found"]
+                
+                except KeyError:
+                
+                    # We should probably complain about the file handle
+                    # rather than about the path.
+                    msg = ["E"+reply_id, 0x100d6, "Not found"]
+
+                # Send a reply.
+                self._send_list(msg, _socket, address)
+                
+
             elif code == 0x16:
                 # Get 32 bit free space
 
