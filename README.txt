@@ -42,8 +42,17 @@ application's shutdown sequence.
 Killing the process will also stop it but you may find that various threads
 are still active and sockets are still in use.
 
+The application tries to work out the correct network settings based on the
+system's hostname.  You can tell it to use the network details of a specific
+ethernet interface by running
+
+  access.py -i <interface>
+
 Firewall
 
 access.py listens on UDP ports 32770, 32771 and 49171.  You must ensure that
 these ports are not blocked by your firewall.
 
+Security
+
+Access is not a secure system.  Do not run access.py as root.

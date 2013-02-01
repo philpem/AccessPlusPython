@@ -26,14 +26,11 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
 
-ETHERNET_INTERFACE = ""
 __version__ = "0.29"
 
 import glob, os, string, socket, struct, sys, threading, time, types, select
 import subprocess
-
-if len(sys.argv) > 1:
-	ETHERNET_INTERFACE = sys.argv[1]
+import getopt
 
 if not os.__dict__.has_key("extsep"):
 
@@ -137,53 +134,15 @@ def logging_off():
 
 Hostname = socket.gethostname()
 
-if ETHERNET_INTERFACE != "":
-	p = subprocess.Popen(["/sbin/ifconfig", ETHERNET_INTERFACE], stdout=subprocess.PIPE)
-	stdout,stderr = p.communicate()
-	stdout = stdout.replace("\n", "");
-	# Find Hostaddr
-	c = string.find(stdout, "inet addr")
-	if c != -1:
-		start = string.find(stdout, ":", c)
-		if start != -1:
-			end = string.find(stdout, ' ', start)
-			Hostaddr = stdout[start+1:end]
+# Convert the host name into an address.
+Hostaddr = socket.gethostbyname(Hostname)
 
-	# Find broadcast address
-	c = string.find(stdout, "Bcast")
-	if c != -1:
-		start = string.find(stdout, ":", c)
-		if start != -1:
-			end = string.find(stdout, " ", start)
-			Broadcast_addr = stdout[start+1:end]
+# Construct a broadcast address.
+at = string.rfind(Hostaddr, ".")
+Broadcast_addr = Hostaddr[:at] + ".255"
 
-	# Find Subnet
-	c = string.find(stdout, "Mask")
-	if c != -1:
-		start = string.find(stdout, ":", c)
-		if start != -1:
-			end = string.find(stdout, " ", start)
-			Netmask = stdout[start+1:end]
-			mask = string.split(Netmask, ".")
-			addr = string.split(Hostaddr, ".")
-			Subnet = ""
-			# FIXME: Deal with subnets that do not elements
-			# other than 255 or 0
-			for i in range(len(mask)):
-				if (mask[i] == "255"):
-					if (i != 0):
-						Subnet = Subnet + "."
-					Subnet = Subnet + addr[i]
-else:
-	# Convert the host name into an address.
-	Hostaddr = socket.gethostbyname(Hostname)
-
-	# Construct a broadcast address.
-	at = string.rfind(Hostaddr, ".")
-	Broadcast_addr = Hostaddr[:at] + ".255"
-
-	# Define a string to represent the local subnet.
-	Subnet = Hostaddr[:at]
+# Define a string to represent the local subnet.
+Subnet = Hostaddr[:at]
 
 # Use just the hostname from the full hostname retrieved.
 
@@ -196,6 +155,55 @@ if at != -1:
 # Keep track of usable handles
 available_handles = []
 max_available_handle = 3
+
+def setup_net(interface):
+    global Hostaddr
+    global Broadcast_addr
+    global Subnet
+
+    Hostaddr = None
+    Broadcast_addr = None
+    Subnet = None
+
+    p = subprocess.Popen(["/sbin/ifconfig", interface], stdout=subprocess.PIPE)
+    stdout,stderr = p.communicate()
+    stdout = stdout.replace("\n", "");
+    # Find Hostaddr
+    c = string.find(stdout, "inet addr")
+    if c != -1:
+        start = string.find(stdout, ":", c)
+        if start != -1:
+            end = string.find(stdout, ' ', start)
+            Hostaddr = stdout[start+1:end]
+
+    # Find broadcast address
+    c = string.find(stdout, "Bcast")
+    if c != -1:
+        start = string.find(stdout, ":", c)
+        if start != -1:
+            end = string.find(stdout, " ", start)
+            Broadcast_addr = stdout[start+1:end]
+
+    # Find Subnet
+    c = string.find(stdout, "Mask")
+    if c != -1:
+        start = string.find(stdout, ":", c)
+        if start != -1:
+            end = string.find(stdout, " ", start)
+            Netmask = stdout[start+1:end]
+            mask = string.split(Netmask, ".")
+            addr = string.split(Hostaddr, ".")
+            Subnet = ""
+            # FIXME: Deal with subnets that do not elements
+            # other than 255 or 0
+            for i in range(len(mask)):
+               	if (mask[i] == "255"):
+                    if (i != 0):
+                        Subnet = Subnet + "."
+                    Subnet = Subnet + addr[i]
+    if Hostaddr == None or Broadcast_addr == None or Subnet == None:
+        print "Failed to find Ethernet addresses for interface", interface
+        sys.exit(1)
 
 def get_next_handle():
     global available_handles, max_available_handle
@@ -1098,7 +1106,7 @@ class ConfigError(Exception):
 
 class File:
 
-    def __init__(self, path, share, user):
+    def __init__(self, path, share, user, mode="r+w"):
     
         self.pieces = []
         self.ptr = 0
@@ -1112,11 +1120,13 @@ class File:
         
         if not os.path.exists(path):
         
-            # Create the object.
-            open(path, "wb").write("")
+            if mode == "r+w":
+
+                # Create the object.
+                open(path, "wb").write("")
         
         # Open the file.
-        self.fh = open(path, "r+w")
+        self.fh = open(path, mode)
     
     def tell(self):
     
@@ -1454,7 +1464,7 @@ class Translate:
         
         # The suffix includes the "." character. Remove this platform's
         # separator and replace it with a ".".
-        suffix = "." + filename[at+len(os.extsep):]
+        suffix = "." + filename[at+len(os.extsep):].lower()
         
         # Find the suffix in the list of mappings.
         for mapping in self.mimemap:
@@ -1845,6 +1855,15 @@ class Share(Ports, Translate):
         # Start the thread.
         self.thread.start()
     
+    def cleanup_handles(self, host):
+
+         for handle in self.file_handler.keys():
+ 
+             if self.file_handler[handle].user == host:
+
+                 self.file_handler[handle].close()
+                 del self.file_handler[handle]
+
     def get_key(self):
         return self.key
 
@@ -1939,7 +1958,8 @@ class Share(Ports, Translate):
             self._send_list(data, s, (Broadcast_addr, 32770))
             
             self.event.wait(self.delay)
-            if self.event.isSet(): return
+            if self.event.isSet():
+                break
         
         # Broadcast that the share has now been removed.
         
@@ -1950,6 +1970,8 @@ class Share(Ports, Translate):
             0x00010003, 0x00010000, 0x00010000 | len(self.name),
             self.name + chr(self.share_type)
         ]
+
+        self._send_list(data, s, (Broadcast_addr, 32770))
     
     #def notify_share_users(self, 
     
@@ -1967,10 +1989,14 @@ class Share(Ports, Translate):
         
         if path == self.directory:
         
-            mode = self.read_mode(self.directory)
-            if mode is None or (mode & check_mode & self.mode) == 0:
-                return self.directory, None
-
+            # FIXME: Returning None here causes issues with the return
+            # statement.  At the moment, ignore the physical permissions
+            # of the directory.  This will need looking at more thoroughly
+            # mode = self.read_mode(self.directory)
+            # if mode is None or (mode & check_mode & self.mode) == 0:
+            if check_mode & self.mode == 0:
+                return self.directory, None 
+ 
             return self.directory, names
         
         # Split the path into two parts.
@@ -2002,7 +2028,7 @@ class Share(Ports, Translate):
         # list of names.
         return next_path, names[1:]
     
-    def open_path(self, ros_path, host):
+    def open_path(self, ros_path, host, mode):
     
         self.log("comment", "Original path: %s" % ros_path, "")
         
@@ -2074,7 +2100,13 @@ class Share(Ports, Translate):
             # Keep this handle for possible later use.
             if not self.file_handler.has_key(handle):
             
-                self.file_handler[handle] = File(path, self, host)
+                try:
+
+                    self.file_handler[handle] = File(path, self, host, mode = mode)
+
+                except IOError:
+
+                    pass
             
             else:
             
@@ -2093,6 +2125,10 @@ class Share(Ports, Translate):
                     # return an error.
                     return None, path
             
+            if not self.file_handler.has_key(handle):
+
+                return None, path
+
             return [ filetype, date, length, access_attr, object_type,
                      handle ], path
         
@@ -2104,7 +2140,7 @@ class Share(Ports, Translate):
     def create_file(self, ros_path, host):
     
         # Try to open the corresponding file.
-        info, path = self.open_path(ros_path, host)
+        info, path = self.open_path(ros_path, host, "r+w")
         
         if ros_path == "":
         
@@ -2133,7 +2169,10 @@ class Share(Ports, Translate):
             try:
             
                 # Create an object on the local filesystem.
-                path = path + DEFAULT_SUFFIX
+                if self.present == "truncate":
+
+                    path = path + DEFAULT_SUFFIX
+
                 open(path, "wb").write("")
                 os.chmod(path, self.mode | FILE_ATTR)
             
@@ -2200,7 +2239,13 @@ class Share(Ports, Translate):
             # Keep this handle for possible later use.
             if not self.file_handler.has_key(handle):
             
-                self.file_handler[handle] = File(path, self, host)
+                try:
+
+                    self.file_handler[handle] = File(path, self, host)
+
+                except IOError:
+
+                    pass
             
             else:
             
@@ -2211,6 +2256,10 @@ class Share(Ports, Translate):
                 # Use the file object's length, if possible.
                 length = fh.length()
             
+            if not self.file_handler.has_key(handle):
+
+                return None, path
+
             return [ 0xdeaddeadL, 0xdeaddeadL, length, 0x33, object_type,
                      handle ], path
         
@@ -3972,6 +4021,9 @@ class Peer(Ports):
         # Use an object to manage the file handles used by shares owned by
         # this Peer.
         self.file_handler = Files()
+
+        # Use an object to record all catalogued paths
+        self.catalogued_paths = {}
         
         # Maintain a dictionary of open shares, on the local host or
         # on other hosts.
@@ -4002,6 +4054,23 @@ class Peer(Ports):
             sys.stdout.write("Closing socket for port %i\n" % port)
             _socket.close()
     
+    def cleanup_handles(self, host):
+
+         for share in self.shares.values():
+
+             share.cleanup_handles(host)
+
+         for handle in self.catalogued_paths.keys():
+
+             (path, mtime, hosts) = self.catalogued_paths[handle]
+             if host in hosts:
+
+                 hosts[:] = [h for h in hosts if h != host]
+                 if len(hosts) == 0:
+
+                     del self.catalogued_paths[handle]
+
+
     def create_shares(self):
     
         """creates_shares(self)
@@ -4232,7 +4301,7 @@ class Peer(Ports):
         # The first element is the share name.
         share_name = path_elements[0]
         
-        return share_name, string.join(path_elements[1:], ".")
+        return share_name.lower(), string.join(path_elements[1:], ".")
     
     def broadcast_startup(self):
     
@@ -4290,9 +4359,32 @@ class Peer(Ports):
             Hostname + self.identity
         ]
         
+        b = self.broadcasters[49171]
+ 
         while 1:
         
             self._send_list(data, s, (Broadcast_addr, 32770))
+
+            # Broadcast any directories that have been updated
+            # There must be a better way to do this.  Possibly
+            # inotify on Linux.
+            for handle in self.catalogued_paths.keys():
+
+                (path, mtime, hosts) = self.catalogued_paths[handle]
+                try:
+
+                    m = os.stat(path)[os.path.stat.ST_MTIME]
+
+                    if (m != mtime):
+
+                        update = [0x00000046, 0x00000013, handle]
+                        self._send_list(update, b, (Broadcast_addr, 49171))
+                        self.catalogued_paths[handle] = (path, m, hosts)
+
+                except OSError:
+
+                    # The directory has probably been deleted
+                    del self.catalogued_paths[handle]
             
             event.wait(delay)
             if event.isSet(): return
@@ -4929,6 +5021,13 @@ class Peer(Ports):
                 # information about the client.
                 info = data[c:c+length2]
                 
+                # A client has booted.  Clean up any handles left over
+                # from it's last boot
+                if self.clients.has_key((client_name, host)):
+
+                    del self.clients[(client_name, host)]
+                    self.cleanup_handles(host)
+
                 #print "Startup client: %s %s" % (client_name, info)
             
             elif minor == 0x0003:
@@ -4958,6 +5057,12 @@ class Peer(Ports):
                 # The string following the client name contains some
                 # information about the client.
                 info = data[c:c+length2]
+
+                # "expire" is the time when we decide the host has died.
+                # 10 mins may be a bit long
+                # FIXME: Should use time.ctime(), but that doesn't seem to
+                # work on my box
+                expire = time.time() + 600
                 
                 #print "Client available: %s %s" % (client_name, info)
                 
@@ -4966,7 +5071,12 @@ class Peer(Ports):
                 if not self.clients.has_key((client_name, host)):
                 
                     # Add an entry for the client to the dictionary.
-                    self.clients[(client_name, host)] = info
+                    self.clients[(client_name, host)] = (info, expire)
+
+                else:
+
+                    self.clients[(client_name, host)] = (info, expire)
+                    
             
             elif DEBUG == 1:
             
@@ -4978,6 +5088,15 @@ class Peer(Ports):
                 
                     print line
         
+            # Clean up any handles left over from any clients
+            # that have probably been switched off
+            for (name, host), (info, expire) in self.clients.items():
+
+                if expire < time.time():
+
+                    del self.clients[(name, host)]
+                    self.cleanup_handles(host)
+
         elif DEBUG == 1:
         
             print "From: %s:%i" % address
@@ -5027,11 +5146,19 @@ class Peer(Ports):
     
         self.log("received", data, address)
         
-        key = self.str2num(4, data[8:])
+        request1 = self.str2num(4, data[0:4])
+        request2 = self.str2num(4, data[4:8])
         host = address[0]
-        for s in self.shares.values():
-            if s.get_key() == key:
-                s._send_secure_share(address)
+
+        if request1 == 0x10001 and request2 == 0x10001:
+
+            key = self.str2num(4, data[8:])
+
+            for s in self.shares.values():
+	
+                if s.get_key() == key:
+	
+                    s._send_secure_share(address)
     
     def read_share_socket(self):
     
@@ -5102,8 +5229,7 @@ class Peer(Ports):
         
             if code == 0x1:
             
-                # Open a share, directory or path.
-                # FIXME: This should open a path for reading and writing
+                # Open a share, directory or path for read only
                 
                 # Find the share and RISC OS path within it.
                 share_name, ros_path = self.read_share_path(data[12:])
@@ -5121,7 +5247,7 @@ class Peer(Ports):
                     # Pass the name of the host making this request as this
                     # information will be used to prevent other users from
                     # modifying this file while it is in use.
-                    info, path = share.open_path(ros_path, host)
+                    info, path = share.open_path(ros_path, host, "r")
                 
                 except KeyError:
                 
@@ -5150,8 +5276,7 @@ class Peer(Ports):
             
             elif code == 0x2:
             
-                # Open a share, directory or path.
-                # FIXME: This should open a path for reading only
+                # Open a share, directory or path for reading and writing
                 
                 # Find the share and RISC OS path within it.
                 share_name, ros_path = self.read_share_path(data[12:])
@@ -5165,7 +5290,7 @@ class Peer(Ports):
                 try:
                 
                     share = self.shares[(share_name, Hostaddr)]
-                    info, path = share.open_path(ros_path, host)
+                    info, path = share.open_path(ros_path, host, "r+w")
                 
                 except KeyError:
                 
@@ -5721,6 +5846,20 @@ class Peer(Ports):
                 
                 if infolist is not None:
                 
+                    handle = trailer[5]
+                    if not self.catalogued_paths.has_key(handle):
+
+                        self.catalogued_paths[handle] = (path, os.stat(path)[os.path.stat.ST_MTIME], [host])
+
+                    else:
+
+                        (path, mtime, hosts) = self.catalogued_paths[handle]
+                        if not host in hosts:
+ 
+                            hosts.append(host)
+
+                        self.catalogued_paths[handle] = (path, mtime, hosts)
+
                     # Remember thes results for later
                     if len(infolist) > 1:
                         self.catalogue_cache[(handle, address)] = infolist
@@ -6099,7 +6238,7 @@ class Peer(Ports):
         
             sys.stdout.write("Type 5 (Hosts)\n")
             
-            for (name, host), info in self.clients.items():
+            for (name, host), (info, expire) in self.clients.items():
             
                 marker = [" ", "*"][host == Hostaddr]
                 
@@ -6155,6 +6294,8 @@ class Peer(Ports):
         to other hosts.
         """
         
+        name = name.lower()
+
         if self.shares.has_key((name, Hostaddr)):
         
             print "Share is already available: %s" % name
@@ -6372,13 +6513,18 @@ if __name__ == "__main__":
     # from a suitable .access configuration file.
     sys.stdout.write("Starting...\n")
     
-    if "--no-access-plus" in sys.argv:
+    want_access_plus = 1
+    try:
+        optlist, args = getopt.gnu_getopt(sys.argv[1:], "i:", ["interface=", "no-access-plus"])
+    	for o, a in optlist:
+    	    if o in ("-i", "--interface"):
+    	        setup_net(a)
+    	    elif o == "--no-access-plus":
+    	        want_access_plus = 0
+    except getopt.GetoptError, err:
+        print err
     
-        p = Peer(access_plus = 0)
-    
-    else:
-    
-        p = Peer()
+    p = Peer(access_plus = want_access_plus)
     
     DEBUG = 0
     
