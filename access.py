@@ -4,7 +4,8 @@ access.py
 
 Tools for examining data sent via UDP from an Access+ station.
 
-Copyright (c) 2003-4 David Boddie
+Copyright (c) 2003-2012 David Boddie
+Copyright (c) 2012 James Woodcock <james_woodcock@yahoo.co.uk>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to
@@ -2769,7 +2770,7 @@ class Share(Ports, Translate):
                 length = 0
             
             if chunk_length + length > 2048:
-        	# Fill in the directory length.
+                # Fill in the directory length.
                 info[0] = chunk_length
                 infolist.append(info)
                 chunk_length = 0
@@ -4254,7 +4255,7 @@ class Peer(Ports):
         
         myshare /home/user/myfile 0644 off truncate 0xffd
 
-		The "key" parameter is the Access+ key
+        The "key" parameter is the Access+ key
         
         Access+ shares
 
