@@ -1,6 +1,17 @@
 # Uncomment and customise the lines you want.
 
-# Share      Path                   Mode    Delay (s)   Presentation    Filetype
+#Share     Path                Mode    Delay(s) Presentation Filetype PIN
 
-#  user      /home/user/share       0644    30.0        truncate        0xfff
-#  scratch   /home/user/temp/share  0666    30.0        truncate        0xfff
+#user      /home/usr/share     0644    30.0     truncate     0xfff
+#scratch   /home/usr/tmp/share 0666    30.0     truncate     0xfff
+
+#Access+ directories. Create /srv/accessplus/Apps and /srv/accessplus/Boot
+#to use.
+#<Access+> /srv/accessplus
+
+# <Printer> <name> <path> <definition file> <delay> <filetype> <description> <command>
+# "definition file" should be copied to this host from the RISC OS
+# PrintDefs: directory
+# "command" is currently unused.
+#<Printer> myprint /srv/printer /srv/printer/PoScript.prdef 30.0 0xfff MyPrinter NotUsedYet
+
