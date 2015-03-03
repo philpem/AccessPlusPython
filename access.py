@@ -5550,7 +5550,7 @@ class Peer(Ports):
                     # Pass the name of the host making this request as this
                     # information will be used to prevent other users from
                     # modifying this file while it is in use.
-                    info, path = share.open_path(ros_path, host, "r")
+                    info, path = share.open_path(ros_path, host, "rb")
                 
                 except KeyError:
                 
