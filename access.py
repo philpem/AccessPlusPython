@@ -4370,7 +4370,15 @@ class Peer(Ports):
         paths.append(path)
         
         # Add the user's home directory.
-        paths.append(os.getenv("HOME"))
+        home = os.getenv("HOME")
+        if home:
+            paths.append(home)
+
+        # Try Windows home directory as well.
+        home = os.getenv("USERPROFILE")
+        if home:
+            paths.append(home)
+
         
         f = None
         
