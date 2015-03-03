@@ -859,28 +859,27 @@ class Ports(Common):
         
         while tries > 0:
         
-            # See if the response has arrived.
-            replied, data = \
-                self.share_messages._scan_messages(host, new_id, commands)
+            if self.share_messages.wait_for_event(host, new_id, 1.0):
+
+                # See if the response has arrived.
+                replied, data = \
+                    self.share_messages._scan_messages(host, new_id, commands)
             
-            # If a message was found or an error occurred then return
-            # immediately.
-            if replied != 0:
+                # If a message was found or an error occurred then return
+                # immediately.
+                if replied != 0:
             
-                # Remove the entry in the Messages object for replies to this
-                # message.
-                self.share_messages.remove_entry(host, new_id)
+                    # Remove the entry in the Messages object for replies to this
+                    # message.
+                    self.share_messages.remove_entry(host, new_id)
                 
-                return replied, data
-            
-            t1 = time.time()
-            
-            if replied == 0 and (t1 - t0) > 1.0:
+                    return replied, data
+
+            else:
             
                 # Send the request again.
                 self._send_list(msg, _socket, (host, 49171))
                 
-                t0 = t1
                 tries = tries - 1
         
         # Remove the entry in the Messages object for replies to this
@@ -1061,6 +1060,8 @@ class Messages(Common):
     def __init__(self):
     
         self.messages = {}
+        self.events = {}
+        self.lock = threading.Semaphore()
     
     def __getitem__(self, item):
     
@@ -1138,13 +1139,19 @@ class Messages(Common):
         
         if key != "":
         
+            self.lock.acquire()
+
             try:
             
                 self.messages[(host, key)].append(data)
+
+                self.lock.release()
+
+                self.signal_event(host, key)
             
             except KeyError:
             
-                pass
+                self.lock.release()
     
     def remove(self, (host, data)):
     
@@ -1154,6 +1161,8 @@ class Messages(Common):
         
         if key != "":
         
+            self.lock.acquire()
+
             try:
             
                 self.messages[(host, key)].remove(data)
@@ -1161,19 +1170,54 @@ class Messages(Common):
             except KeyError:
             
                 pass
+
+            self.lock.release()
     
     def add_entry(self, host, new_id):
     
         # Add a dictionary entry for expected messages with this ID.
+
+        self.lock.acquire()
+
         self.messages[(host, new_id)] = []
+        self.events[(host, new_id)] = threading.Event()
+
+        self.lock.release()
     
     def remove_entry(self, host, new_id):
     
         # Remove dictionary entries for messages which are no longer valid.
+
+        self.lock.acquire()
+
         del self.messages[(host, new_id)]
-    
+        del self.events[(host, new_id)]
+
+        self.lock.release()
+
+    def wait_for_event(self, host, new_id, delay):
+
+        self.lock.acquire()
+
+        evt = self.events[(host, new_id)]
+
+        self.lock.release()
+
+        return evt.wait(delay)
+
+    def signal_event(self, host, new_id):
+ 
+        self.lock.acquire()
+
+        self.events[(host, new_id)].set()
+
+        self.lock.release()
+ 
     def _scan_messages(self, host, new_id, commands):
     
+
+        self.lock.acquire()
+
         for data in self.messages[(host, new_id)]:
         
             for command in commands:
@@ -1185,6 +1229,8 @@ class Messages(Common):
                     
                     #self.data = data
                     
+                    self.lock.release()
+
                     # Reply indicating that valid data was received.
                     return 1, data
                 
@@ -1193,13 +1239,19 @@ class Messages(Common):
                 #print 'Error: "%s"' % data[8:]
                 self.messages[(host, new_id)].remove(data)
                 
+                self.lock.release()
+
                 return -1, (self.str2num(4, data[4:8]), data[8:])
         
+        self.lock.release()
+
         # Return a negative result.
         return 0, (0, "The machine containing the shared disc does not respond")
     
     def _all_messages(self, host, new_id, commands):
     
+        self.lock.acquire()
+
         try:
         
             reply_messages = self.messages[(host, new_id)]
@@ -1222,6 +1274,8 @@ class Messages(Common):
                     # Add it to the list of messages found.
                     messages.append(data)
         
+        self.lock.release()
+
         return messages
     
 
