@@ -63,7 +63,10 @@ between_epochs = ((365 * 70) + 17) * 24 * 360000L
 RECV_SIZE = 128*1024
 RECV_PPUT_SIZE = 8192
 RECV_GET_SIZE = 8192
-RECV_PGET_SIZE = 16384
+# RO3 on RPCEmu prefers to send files in 8192 byte chunks.
+# We should be able to request 16384 byte chunks, but that currenly leads
+# to data corruption
+RECV_PGET_SIZE = 8192
 
 # Amounts the remote client can receive
 SEND_SIZE = 16384
@@ -3317,7 +3320,7 @@ class RemoteShare(Ports, Translate):
                 elif data[0] == "D":
                 
                     data_pos = self.str2num(4, data[4:8]) + start_addr
-                    
+
                     if data_pos == next_addr:
                     
                         break
