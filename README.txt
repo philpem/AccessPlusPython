@@ -24,9 +24,9 @@ if you must.
 Before you can share anything with other machines on your local network you
 must set up the .access configuration file. The sample configuration file
 "dot-access" can be customised to suit your needs then renamed and placed,
-if you wish, in your home directory. You will also need a MimeMap file from
-a RISC OS machine. It should be placed in the same directory as the access.py
-file.
+if you wish, in your home directory. On Windows, this will be the %USERPROFILE%
+directory. You will also need a MimeMap file from a RISC OS machine. It should
+be placed in the same directory as the access.py file.
 
 At this point you are on your own. Read and understand the license again
 before proceeding.
@@ -47,6 +47,12 @@ system's hostname.  You can tell it to use the network details of a specific
 ethernet interface by running
 
   access.py -i <interface>
+
+If your IP address is on a class C subnet (ie, with netmask 255.255.255.0) then
+access.py should work correctly.  If not, then access.py must be modified by
+hand to set up its network addresses. Change the "Netmask" variable to match
+your netmask. You may also need to change the "Hostaddr" variable if your
+hostname resolves to the localhost address (127.0.0.1 or 127.0.1.1).
 
 Firewall
 

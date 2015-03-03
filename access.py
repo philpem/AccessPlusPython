@@ -141,13 +141,20 @@ Hostname = socket.gethostname()
 
 # Convert the host name into an address.
 Hostaddr = socket.gethostbyname(Hostname)
+Netmask = "255.255.255.0"
 
-# Construct a broadcast address.
-at = string.rfind(Hostaddr, ".")
-Broadcast_addr = Hostaddr[:at] + ".255"
+netoctets = string.split(Netmask, ".")
+netcount = 0
+for octet in netoctets:
+    if octet == "255":
+        netcount = netcount + 1
 
 # Define a string to represent the local subnet.
-Subnet = Hostaddr[:at]
+Subnet = string.join(string.split(Hostaddr, ".")[:netcount], ".")
+
+# Construct a broadcast address.
+all255 = ["255", "255", "255", "255"]
+Broadcast_addr = Subnet + "." + string.join(all255[:4-netcount], ".")
 
 # Use just the hostname from the full hostname retrieved.
 
