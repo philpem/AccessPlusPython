@@ -1206,7 +1206,11 @@ class Messages(Common):
 
         self.lock.release()
 
-        return evt.wait(delay)
+        if not evt.isSet():
+
+            evt.wait(delay)
+
+        return evt.isSet()
 
     def signal_event(self, host, new_id):
  
@@ -3312,11 +3316,11 @@ class RemoteShare(Ports, Translate):
                 if data[0] == "D" and len(data) > 8:
                 
                     from_addr = self.str2num(4, data[4:8]) + start_addr
-                    
+
                     file_data.append(data[8:])
                     
                     from_addr = from_addr + len(data) - 8
-                
+
                 elif data[0] == "D":
                 
                     data_pos = self.str2num(4, data[4:8]) + start_addr
