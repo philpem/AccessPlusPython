@@ -733,18 +733,27 @@ class Ports(Common):
 
             else:
             
-                # Pad the string to fit an integer number of words.
-                # If the string is to be terminated by a particular
-                # character, it should have been included with the
-                # string.
+                if type(l[0]) == types.StringType and l[0][0] == "D":
+
+                    # This is a chunk of file being sent to a client.
+                    # Don't pad it
+
+                    output.append(item)
+
+                else:
+
+                    # Pad the string to fit an integer number of words.
+                    # If the string is to be terminated by a particular
+                    # character, it should have been included with the
+                    # string.
                 
-                padding = 4 - (len(item) % 4)
+                    padding = 4 - (len(item) % 4)
                 
-                if padding == 4: padding = 0
+                    if padding == 4: padding = 0
                 
-                padded = item + (padding * "\000")
+                    padded = item + (padding * "\000")
                 
-                output.append(padded)
+                    output.append(padded)
         
         return string.join(output, "")
     
@@ -831,7 +840,7 @@ class Ports(Common):
 
                 break
     
-    def _expect_reply(self, _socket, msg, host, new_id, commands,
+    def _send_and_expect_reply(self, _socket, msg, host, new_id, commands,
                       tries = 5, delay = 2):
     
         # Add an entry to the Messages object so that replies to this message
@@ -839,7 +848,10 @@ class Ports(Common):
         # the derived class has an attribute called "share_messages" which
         # refers to a Messages instance.
         self.share_messages.add_entry(host, new_id)
-        
+
+        # Send the request.
+        self._send_list(msg, _socket, (host, 49171))
+
         replied = 0
         
         # Keep a record of the time of the previous request.
@@ -918,12 +930,9 @@ class Ports(Common):
         # other client (it passes them back in its response).
         msg[0] = msg[0] + new_id
         
-        # Send the request.
-        self._send_list(msg, s, (host, 49171))
-        
         # Wait for a reply.
         replied, data = \
-            self._expect_reply(s, msg, host, new_id, commands, tries, delay)
+            self._send_and_expect_reply(s, msg, host, new_id, commands, tries, delay)
         
         #if replied == 1:
         #
@@ -3470,12 +3479,9 @@ class RemoteShare(Ports, Translate):
                     ""
                     )
                 
-                # Send the reply as a string.
-                s.sendto(msg, (self.host, 49171))
-                
                 # Wait for messages to arrive with the same ID as
                 # the one used to specify the file to be uploaded.
-                replied, data = self._expect_reply(
+                replied, data = self._send_and_expect_reply(
                     s, msg, self.host, reply_id, ["w", "R"]
                     )
                 
@@ -4826,7 +4832,7 @@ class Peer(Ports):
                 
                 # Send the data prefixed by its offset relative to the
                 # start address within the file supplied.
-                msg = self._encode(["D"+reply_id, pos - start]) + file_data
+                msg = ["D", pos - start, file_data]
                 
                 self.log(
                     "comment",
@@ -4835,17 +4841,32 @@ class Peer(Ports):
                         ), ""
                     )
                 
-                self.ports[49171].sendto(msg, (host, 49171))
+                replied, data = self._send_request(
+                    msg, host, ["r"], new_id = reply_id
+                    )
+
+                if replied != 1:
+
+                    return
                 
                 # Send a message with the new offset within the block
                 # requested.
                 msg = ["D", new_pos - start] # - start is experimental
                 
                 # Send the reply.
-                replied, data = self._send_request(
-                    msg, host, ["r"], new_id = reply_id
-                    )
-                
+                if new_pos == end:
+
+                    # We're not expecting a reply for the last message
+                    self._send_list(msg, self.ports[49171], (host, 49171))
+
+                    break
+
+                else:
+
+                    replied, data = self._send_request(
+                        msg, host, ["r"], new_id = reply_id
+                        )
+
                 if replied == -1:
                 
                     return
