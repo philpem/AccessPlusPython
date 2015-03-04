@@ -5543,7 +5543,8 @@ class Peer(Ports):
         
         msg = None
         
-        if command == "A":
+        # command "A", code 0xd is handled lower down.
+        if command == "A" and code != 0xd:
         
             if code == 0x1:
             
