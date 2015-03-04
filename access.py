@@ -54,6 +54,8 @@ DEFAULT_SHARE_DELAY = 30.0
 DEFAULT_PRINTER_DELAY = 30.0
 TIDY_DELAY = 60.0
 
+NO_PAD = 1
+
 # Find the number of centiseconds between 1900 and 1970.
 between_epochs = ((365 * 70) + 17) * 24 * 360000L
 
@@ -741,29 +743,29 @@ class Ports(Common):
             
                 output.append(self.number(4, item))
 
-            else:
-            
-                if type(l[0]) == types.StringType and l[0][0] == "D":
+            elif type(item) == types.TupleType:
+
+                if item[0] == NO_PAD:
 
                     # This is a chunk of file being sent to a client.
                     # Don't pad it
 
-                    output.append(item)
+                    output.append(item[1])
 
-                else:
-
-                    # Pad the string to fit an integer number of words.
-                    # If the string is to be terminated by a particular
-                    # character, it should have been included with the
-                    # string.
+            else:
+            
+                # Pad the string to fit an integer number of words.
+                # If the string is to be terminated by a particular
+                # character, it should have been included with the
+                # string.
                 
-                    padding = 4 - (len(item) % 4)
+                padding = 4 - (len(item) % 4)
                 
-                    if padding == 4: padding = 0
+                if padding == 4: padding = 0
                 
-                    padded = item + (padding * "\000")
+                padded = item + (padding * "\000")
                 
-                    output.append(padded)
+                output.append(padded)
         
         return string.join(output, "")
     
@@ -4908,7 +4910,7 @@ class Peer(Ports):
                 
                 # Send the data prefixed by its offset relative to the
                 # start address within the file supplied.
-                msg = ["D", pos - start, file_data]
+                msg = ["D", pos - start, (NO_PAD, file_data)]
                 
                 self.log(
                     "comment",
