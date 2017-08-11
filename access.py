@@ -4607,7 +4607,7 @@ class Peer(Ports):
             self._send_list(data, s, (Broadcast_addr, 32770))
 
             # Find any secure shares on the network
-            for u, k in self.access_users.iteritems():
+            for k in self.access_users.items():
 
                 self._request_secure_share(k)
 
@@ -5168,7 +5168,7 @@ class Peer(Ports):
 
                     # A key follows the leading three words.
                     key = self.str2num(4, data[12:16])
-                    for u, k in self.access_users.iteritems():
+                    for k in self.access_users.items():
 
                         if k == key:
 
