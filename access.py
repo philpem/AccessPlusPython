@@ -41,7 +41,7 @@ if sys.version_info > (3,):
 
     long = int
 
-if not os.__dict__.has_key("extsep"):
+if not "extsep" in os.__dict__:
 
     if sys.platform != "riscos":
     
@@ -1047,7 +1047,7 @@ class Files:
     
     def has_key(self, item):
     
-        return self.handles.has_key(item)
+        return item in self.handles
     
     def items(self):
     
@@ -1124,7 +1124,7 @@ class Messages(Common):
     
     def has_key(self, item):
     
-        return self.messages.has_key(item)
+        return item in self.messages
     
     def items(self):
     
@@ -1625,7 +1625,7 @@ class Translate:
         
         for c in name:
         
-            if dict.has_key(c):
+            if c in dict:
             
                 new.append(dict[c])
             
@@ -5105,7 +5105,7 @@ class Peer(Ports):
                     
                     # Compare the share with those recorded.
                     
-                    if not self.shares.has_key((share_name, host)):
+                    if not (share_name, host) in self.shares:
                     
                         # A race condition when setting up shares
                         # means we can receive our share broadcast
@@ -5146,7 +5146,7 @@ class Peer(Ports):
                 
                 # Compare the share with those recorded.
                 
-                if self.shares.has_key((share_name, host)):
+                if (share_name, host) in self.shares:
                 
                     # Remove the share share_name and host from the shares
                     # dictionary.
@@ -5203,7 +5203,7 @@ class Peer(Ports):
                 
                 # Compare the share with those recorded.
                 
-                if valid_share and not self.shares.has_key((share_name, host)):
+                if valid_share and not (share_name, host) in self.shares:
                 
                     # A race condition when setting up shares
                     # means we can receive our share broadcast
@@ -5257,7 +5257,7 @@ class Peer(Ports):
                 
                 # Compare the printer with those recorded.
                 
-                if not self.printers.has_key((printer_name, host)):
+                if not (printer_name, host) in self.printers:
                 
                     # Add the printer name and host to the printers dictionary.
                     self.printers[(printer_name, host)] = (None, None)
@@ -5280,7 +5280,7 @@ class Peer(Ports):
                 
                 # Compare the printer with those recorded.
                 
-                if self.printers.has_key((printer_name, host)):
+                if (printer_name, host) in self.printers:
                 
                     # Remove the printer name and host from the printers
                     # dictionary.
@@ -5304,7 +5304,7 @@ class Peer(Ports):
                 
                 # Compare the printer with those recorded.
                 
-                if not self.printers.has_key((printer_name, host)):
+                if not (printer_name, host) in self.printers:
                 
                     # Add the printer name and host to the printers dictionary.
                     self.printers[(printer_name, host)] = (None, None)
@@ -5346,7 +5346,7 @@ class Peer(Ports):
                 
                 # A client has booted.  Clean up any handles left over
                 # from it's last boot
-                if self.clients.has_key((client_name, host)):
+                if (client_name, host) in self.clients:
 
                     del self.clients[(client_name, host)]
                     self.cleanup_handles(host)
@@ -5392,7 +5392,7 @@ class Peer(Ports):
                 
                 # Compare the client with those in the clients dictionary.
                 
-                if not self.clients.has_key((client_name, host)):
+                if not (client_name, host ) in self.clients:
                 
                     # Add an entry for the client to the dictionary.
                     self.clients[(client_name, host)] = (info, expire)
@@ -5823,7 +5823,7 @@ class Peer(Ports):
                     
                     # Create a lock to prevent multiple threads working on the
                     # same file at the same time.
-                    if self.transfers.has_key(ros_path):
+                    if ros_path in self.transfers:
                     
                         thread, host = self.transfers[ros_path]
                         
@@ -5923,7 +5923,7 @@ class Peer(Ports):
                     
                     # Create a lock to prevent multiple threads working on the
                     # same file at the same time.
-                    if self.transfers.has_key(path):
+                    if path in self.transfers:
                     
                         thread, host = self.transfers[path]
                         
@@ -5998,7 +5998,7 @@ class Peer(Ports):
                         
                         # Create a lock to prevent multiple threads working on the
                         # same file at the same time.
-                        if self.transfers.has_key(path):
+                        if path in self.transfers:
                         
                             thread, host = self.transfers[path]
                             
@@ -6230,7 +6230,7 @@ class Peer(Ports):
                 
                     handle = trailer[5]
                     self.catalogued_paths_lock.acquire()
-                    if not self.catalogued_paths.has_key(handle):
+                    if not handle in self.catalogued_paths:
 
                         self.catalogued_paths[handle] = (path, os.stat(path)[os.path.stat.ST_MTIME], [host])
 
