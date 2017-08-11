@@ -134,6 +134,7 @@ SHARE_TYPE_CDROM     = 0x10
 
 DEBUG = 1
 LOG_LEVEL = 0   # show all messages
+LOG_FILE = "/var/log/accesspluspython/log.txt"
 
 def logging_on(level):
 
@@ -1074,10 +1075,16 @@ class Ports(Common):
             Ports._log.append(data)
         
         Ports._log.append("")
+
+        self.write_log(LOG_FILE)
     
     def write_log(self, path):
     
-        open(path, "w").writelines(map(lambda x: x + "\n", Ports._log))
+        with open(path, "a") as f:
+
+            f.writelines(map(lambda x: str(x) + "\n", Ports._log))
+
+        Ports._log = []
 
 
 
