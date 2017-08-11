@@ -1844,7 +1844,7 @@ class Translate:
         
         If a path is given then its mode is determined and used instead.
         
-        If no valid mode value can be determined then 0444 is used.
+        If no valid mode value can be determined then 0o444 is used.
         """
         
         if path is not None:
@@ -1853,7 +1853,7 @@ class Translate:
         
         if mode is None:
         
-            mode = 0444
+            mode = 0o444
         
         # Owner permissions
         owner_read = (mode & os.path.stat.S_IRUSR) != 0
@@ -4338,7 +4338,7 @@ class Peer(Ports):
         file. This should take the form of a twelve bit integer in
         Python or C hexadecimal form, e.g. 0xfff.
         
-        myshare /home/user/myfile 0644 off truncate 0xffd
+        myshare /home/user/myfile 0o644 off truncate 0xffd
 
         The "key" parameter is the Access+ key
         
@@ -4517,7 +4517,7 @@ class Peer(Ports):
                 for s in sh:
                     p = pth + "/" + s[0]
                     if os.path.isdir(p):
-                        self.add_share(s[0] + "@" + Hostname, p, 0644, 30.0, "truncate", 0xfff, 0, s[1])
+                        self.add_share(s[0] + "@" + Hostname, p, 0o644, 30.0, "truncate", 0xfff, 0, s[1])
 
             elif len(values) > 0:
             
@@ -6704,11 +6704,11 @@ class Peer(Ports):
             
             sys.stdout.write("\n")
     
-    def add_share(self, name, directory, mode = 0644, delay = 30,
+    def add_share(self, name, directory, mode = 0o644, delay = 30,
                   present = "truncate", filetype = DEFAULT_FILETYPE, key = 0,
                   share_type = SHARE_TYPE_NORMAL):
     
-        """add_share(self, name, directory, mode = 0644, delay = 30,
+        """add_share(self, name, directory, mode = 0o644, delay = 30,
                      present = "truncate", filetype = DEFAULT_FILETYPE,
                      key = 0, share_type = SHARE_TYPE_NORMAL)
         
@@ -6866,13 +6866,13 @@ class Peer(Ports):
         if not self.shares.has_key((PrintShareName, Hostaddr)):
         
             #share = PrinterShare(
-            #    name, PrintShareName, directory, 0666, delay,
+            #    name, PrintShareName, directory, 0o666, delay,
             #    "truncate", filetype, self.file_handler
             #    )
             #
             #self.shares[(PrintShareName, Hostaddr)] = share
             self.add_share(
-                PrintShareName, directory, 0666, delay, "truncate", filetype,
+                PrintShareName, directory, 0o666, delay, "truncate", filetype,
                 0, SHARE_TYPE_HIDDEN)
     
     def remove_printer(self, name):
