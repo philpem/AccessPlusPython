@@ -1662,10 +1662,10 @@ class Translate:
             suffix = filename[at+len(DEFAULT_FILETYPE_SEPARATOR):]
             hyphen = suffix.find('-')
             if len(suffix) == 3:
-                filetype = string.atoi(suffix, 16)
+                filetype = int(suffix, 16)
             elif hyphen != -1:
-                load_addr = string.atoi(suffix[:hyphen], 16)
-                exec_addr = string.atoi(suffix[hyphen+1:], 16)
+                load_addr = int(suffix[:hyphen], 16)
+                exec_addr = int(suffix[hyphen+1:], 16)
                 loadexec = (load_addr, exec_addr)
             else:
                 filetype = DEFAULT_FILETYPE
@@ -1695,12 +1695,12 @@ class Translate:
                     if self.present == "truncate":
                     
                         # Remove the suffix before presenting it to RISC OS.
-                        return string.atoi(mapping["Hex"], 16), \
+                        return int(mapping["Hex"], 16), \
                             None, self.to_riscos_filename(filename)[:at]
                     
                     else:
                     
-                        return string.atoi(mapping["Hex"], 16), \
+                        return int(mapping["Hex"], 16), \
                             None, self.to_riscos_filename(filename)
                    
                 except ValueError:
@@ -1713,7 +1713,7 @@ class Translate:
         # Check whether the filename included a hexadecimal suffix.
         try:
         
-            value = string.atoi(suffix[len(os.extsep):], 16)
+            value = int(suffix[len(os.extsep):], 16)
         
         except ValueError:
         
@@ -1751,7 +1751,7 @@ class Translate:
         for mapping in self.mimemap:
         
             # Convert the MimeMap entry's filetype to a string.
-            if filetype == string.atoi(mapping["Hex"], 16):
+            if filetype == int(mapping["Hex"], 16):
             
                 # Return the first corresponding suffix.
                 try:
@@ -6746,7 +6746,7 @@ class Peer(Ports):
             if type(mode) == str:
             
                 mode = self.coerce(
-                    string.atoi, (mode, 8), (ValueError,), ShareError,
+                    int, (mode, 8), (ValueError,), ShareError,
                     "Invalid octal value for mode mask: %s" % mode
                     )
             
@@ -6770,14 +6770,14 @@ class Peer(Ports):
             if type(filetype) == str:
             
                 filetype = self.coerce(
-                    string.atoi, (filetype, 16), (ValueError,), ShareError,
+                    int, (filetype, 16), (ValueError,), ShareError,
                     "Invalid hexadecimal value for filetype: %s" % filetype
                     )
 
             if type(key) == str:
 
                 key = self.coerce(
-                    string.atoi, (key, 16), (ValueError,), ShareError,
+                    int, (key, 16), (ValueError,), ShareError,
                     "Invalid hexadecimal value for key: %s" % filetype
                     )
             
