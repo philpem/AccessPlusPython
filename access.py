@@ -1583,7 +1583,7 @@ class Translate:
         for line in lines:
         
             # Strip leading and trailing whitespace and split the string.
-            s = string.strip(line)
+            s = line.strip()
             
             values = []
             current = ""
@@ -4433,7 +4433,7 @@ class Peer(Ports):
         for line in lines:
         
             # Strip leading and trailing whitespace.
-            s = string.strip(line)
+            s = line.strip()
             
             values = []
             current = ""
