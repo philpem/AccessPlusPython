@@ -394,7 +394,7 @@ class Common:
         except catch_exceptions:
         
             sys.stderr.write(error_msg + "\n")
-            raise raise_exception, "Failed to coerce %s using %s." % (args, fn)
+            raise raise_exception("Failed to coerce %s using %s." % (args, fn))
     
     def interpret(self, data):
     
@@ -848,7 +848,7 @@ class Ports(Common):
                 s.sendto(self._encode(l), to_addr)
                 sent = True
 
-            except socket.error, excpt:
+            except socket.error as excpt:
 
                 if excpt.errno == errno.EAGAIN or \
                     (sys.platform.startswith('win32') and excpt.errno == errno.WSAEWOULDBLOCK):
@@ -4075,7 +4075,7 @@ class Printer(Ports):
         
         except IOError:
         
-            raise PrinterError, "Definition file not found."
+            raise PrinterError("Definition file not found.")
         
         # Create the RemQueue and RemSpool directories inside the printer
         # share directory.
@@ -4103,7 +4103,7 @@ class Printer(Ports):
         
         except OSError:
         
-            raise PrinterError, "Failed to create printer share subdirectories."
+            raise PrinterError("Failed to create printer share subdirectories.")
     
     def broadcast_printer(self):
     
@@ -6727,11 +6727,11 @@ class Peer(Ports):
         
             if not os.path.isdir(directory):
             
-                raise ShareError, "Share directory is invalid: %s" % directory
+                raise ShareError("Share directory is invalid: %s" % directory)
         
         except OSError:
         
-            raise ShareError, "Share directory is invalid: %s" % directory
+            raise ShareError("Share directory is invalid: %s" % directory)
         
         try:
         
@@ -6941,7 +6941,7 @@ if __name__ == "__main__":
                 setup_net(a)
             elif o == "--no-access-plus":
                 want_access_plus = 0
-    except getopt.GetoptError, err:
+    except getopt.GetoptError as err:
         print(err)
 
     PrintShareName = print_share_name(Hostaddr)
