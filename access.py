@@ -2284,7 +2284,7 @@ class Share(Ports, Translate):
     
     #def notify_share_users(self, 
     
-    def descend_path(self, path, names = None, check_mode = PROTECTED_READ):
+    def descend_path(self, path, names = None, share_check_mode = 0, check_mode = PROTECTED_READ):
     
         """path = descend_path(self, path, names = None)
         
@@ -2292,18 +2292,25 @@ class Share(Ports, Translate):
         If this is not far enough then return None.
         
         Similarly, if the path takes us outside the share then return None.
+
+        check_mode is the permissions that the file needs
+        share_check_mode is the permissions that the share needs
+
+        check_mode and share_check_mode are usually the same, but can be
+        different for operations that change a file's metadata
         """
         
         if names is None: names = []
         
         if path == self.directory:
         
-            # FIXME: Returning None here causes issues with the return
-            # statement.  At the moment, ignore the physical permissions
-            # of the directory.  This will need looking at more thoroughly
-            # mode = self.read_mode(self.directory)
-            # if mode is None or (mode & check_mode & self.mode) == 0:
-            if check_mode & self.mode == 0:
+            mode = self.read_mode(self.directory)
+            if share_check_mode == 0:
+
+                share_check_mode = check_mode
+
+            if mode is None or (mode & share_check_mode & self.mode) == 0:
+
                 return self.directory, None 
  
             return self.directory, names
@@ -2312,13 +2319,13 @@ class Share(Ports, Translate):
         path1, path2 = os.path.split(path)
         
         # Recurse with a path and a list of names to descend into.
-        path, names = self.descend_path(path1, [path2] + names)
+        path, names = self.descend_path(path1, [path2] + names, share_check_mode = share_check_mode, check_mode = check_mode)
         
         # Try to descend the directory structure.
         
         # If there are no names to add to the path then just return the path
         # and an empty list.
-        if names == []:
+        if names == [] or names == None:
         
             return path, []
         
@@ -2639,7 +2646,9 @@ class Share(Ports, Translate):
             return None, path
         
         # Find whether the directory structure can be legitimately descended.
-        path, rest = self.descend_path(path, check_mode = self.write_mask)
+        # check_mode should be read | write.  Permissions can be changed
+        # on read-only files on writable shares
+        path, rest = self.descend_path(path, share_check_mode = PROTECTED_WRITE, check_mode = self.write_mask | self.read_mask)
         
         if rest != []:
         
@@ -4713,6 +4722,7 @@ class Peer(Ports):
             # Broadcast any directories that have been updated
             # There must be a better way to do this.  Possibly
             # inotify on Linux.
+            handles_to_delete = []
             for handle, (path, mtime, hosts) in self.catalogued_paths.items():
 
                 try:
@@ -4735,9 +4745,17 @@ class Peer(Ports):
                 except OSError:
 
                     # The directory has probably been deleted
-                    self.catalogued_paths_lock.acquire()
+                    handles_to_delete.append(handle)
+
+            self.catalogued_paths_lock.acquire()
+
+            for handlhandle in handles_to_delete:
+
+                if handle in self.catalogued_paths:
+
                     del self.catalogued_paths[handle]
-                    self.catalogued_paths_lock.release()
+
+            self.catalogued_paths_lock.release()
             
             event.wait(delay)
             if event.isSet(): return
@@ -5671,7 +5689,7 @@ class Peer(Ports):
                 share_name, ros_path = self.read_share_path(self.bytearray2str(data[12:]))
                 
                 self.log(
-                    "comment", 'Request to open "%s" in share "%s"' % (
+                    "comment", 'Request to open "%s" for reading in share "%s"' % (
                         ros_path, share_name
                         ), "",
                     level = LOG_API
@@ -5719,7 +5737,7 @@ class Peer(Ports):
                 share_name, ros_path = self.read_share_path(self.bytearray2str(data[12:]))
                 
                 self.log(
-                    "comment", 'Request to open "%s" in share "%s"' % (
+                    "comment", 'Request to open "%s" for read/write in share "%s"' % (
                         ros_path, share_name
                         ), "",
                     level = LOG_API
