@@ -5774,7 +5774,7 @@ class Peer(Ports):
                 # Create and open a share or directory.
                 
                 # Find the share and RISC OS path within it.
-                share_name, ros_path = self.read_share_path(data[12:])
+                share_name, ros_path = self.read_share_path(self.bytearray2str(data[12:]))
                 
                 self.log(
                     "comment", 'Request to create "%s" in share "%s"' % (
@@ -5800,7 +5800,7 @@ class Peer(Ports):
                     msg = \
                     [
                         "E"+reply_id, 0xaf,
-                        "'%s' cannot be created - " % path + \
+                        "'%s' cannot be created - " % ros_path + \
                         "a directory with that name already exists"
                     ]
                 
