@@ -1084,9 +1084,15 @@ class Ports(Common):
     
     def write_log(self, path):
     
-        with open(path, "a") as f:
+        try:
 
-            f.writelines(map(lambda x: str(x) + "\n", Ports._log))
+            with open(path, "a") as f:
+
+                f.writelines(map(lambda x: str(x) + "\n", Ports._log))
+
+        except:
+
+            pass
 
         Ports._log = []
 
