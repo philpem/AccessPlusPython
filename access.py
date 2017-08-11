@@ -133,7 +133,11 @@ SHARE_TYPE_CDROM     = 0x10
 # Debugging and logging settings
 
 DEBUG = 1
-LOG_LEVEL = 0   # show all messages
+LOG_INFO = 3      # General info
+LOG_API = 2       # High level API
+LOG_DEBUG = 1     # High level API debug
+LOG_PROTOCOL = 0  # Low level network packets
+LOG_LEVEL = LOG_API
 LOG_FILE = "/var/log/accesspluspython/log.txt"
 
 def logging_on(level):
@@ -917,7 +921,7 @@ class Ports(Common):
         using the _encode method then send it on the socket provided.
         """
         
-        self.log("sent", l, to_addr)
+        self.log("sent", l, to_addr, level = LOG_PROTOCOL)
         
         sent = False
         count = 5
@@ -1526,7 +1530,8 @@ class Directory:
                     "comment",
                     "Created %s with permissions: %s" % \
                         (path, oct(share.mode | DIR_EXEC)),
-                    ""
+                    "",
+                    level = LOG_INFO
                     )
             
             except OSError:
@@ -2325,7 +2330,7 @@ class Share(Ports, Translate):
     
     def open_path(self, ros_path, host, mode):
     
-        self.log("comment", "Original path: %s" % ros_path, "")
+        self.log("comment", "Original path: %s" % ros_path, "", level = LOG_API)
         
         # Convert the RISC OS style path to a path within the share.
         path = self.from_riscos_path(ros_path)
@@ -2355,7 +2360,7 @@ class Share(Ports, Translate):
             return [ filetype_word, date_word, ROS_DIR_LENGTH, access_attr,
                      0x102, 0], path
 
-        self.log("comment", "Open path: %s" % path, "")
+        self.log("comment", "Open path: %s" % path, "", level = LOG_API)
         
         # Find whether the directory structure can be legitimately descended.
         if path is not None:
@@ -2505,7 +2510,7 @@ class Share(Ports, Translate):
                 os.remove(path)
                 return None, path
         
-        self.log("comment", "Actual path: %s" % path, "")
+        self.log("comment", "Actual path: %s" % path, "", level = LOG_API)
         
         # Try to find the details of the object.
         
@@ -2584,7 +2589,7 @@ class Share(Ports, Translate):
         
             return None, path
         
-        self.log("comment", "Delete request: %s" % path, "")
+        self.log("comment", "Delete request: %s" % path, "", level = LOG_API)
         
         filetype, date, length, access_attr, object_type, \
             handle = self.read_path_info(path)
@@ -2760,7 +2765,7 @@ class Share(Ports, Translate):
             # Determine the correct suffix to use for the file.
             new_path = self.filetype_to_suffix(ros_path, filetype)
             
-            self.log("comment", "Renaming %s to %s" % (fh.path, new_path), "")
+            self.log("comment", "Renaming %s to %s" % (fh.path, new_path), "", level = LOG_API)
             
             if fh.path != new_path:
             
@@ -3015,19 +3020,19 @@ class Share(Ports, Translate):
         # Write the message header.
         header = [len(file_data), 0xc]
         
-        self.log("comment", "Wrote return header: %s" % header, "")
+        self.log("comment", "Wrote return header: %s" % header, "", level = LOG_API)
         
         # Encode the header, adding padding if necessary.
         header = self._encode(header)
         
-        self.log("comment", "Wrote %i bytes of data" % len(file_data), "")
+        self.log("comment", "Wrote %i bytes of data" % len(file_data), "", level = LOG_API)
         
         # Add a 12 byte trailer onto the end of the data
         # containing the amount of data sent and the new
         # offset into the file being read.
         trailer = [len(file_data), new_pos]
         
-        self.log("comment", "Wrote return trailer: %s" % trailer, "")
+        self.log("comment", "Wrote return trailer: %s" % trailer, "", level = LOG_API)
         
         # Encode the trailer, adding padding if necessary.
         trailer = self._encode(trailer)
@@ -3083,12 +3088,13 @@ class Share(Ports, Translate):
             os.rmdir(path)
             return None, path
         
-        self.log("comment", "Actual path: %s" % path, "")
+        self.log("comment", "Actual path: %s" % path, "", level = LOG_API)
         self.log(
             "comment",
             "%s has permissions: %s" % \
                 (path, oct(os.stat(path)[os.path.stat.ST_MODE])),
-            ""
+            "",
+            level = LOG_API
             )
         
         # Try to find the details of the directory.
@@ -3527,11 +3533,11 @@ class RemoteShare(Ports, Translate):
         # Convert the filename into a RISC OS filename on the share.
         directory, file = os.path.split(path)
         
-        self.log("comment", "File to put: %s" % file, "")
+        self.log("comment", "File to put: %s" % file, "", level = LOG_API)
         
         _, _, ros_file = self.suffix_to_filetype(file)
         
-        self.log("comment", "Remote file: %s" % ros_file, "")
+        self.log("comment", "Remote file: %s" % ros_file, "", level = LOG_API)
         
         # Determine whether the share path supplied refers to a file
         # or a directory.
@@ -3576,7 +3582,7 @@ class RemoteShare(Ports, Translate):
             
             full_path = self.name + "." + ros_path
         
-        self.log("comment", "Remote path: %s" % ros_path, "")
+        self.log("comment", "Remote path: %s" % ros_path, "", level = LOG_API)
         
         # Create a file on the remote server using the full path.
         msg = ["A", 0x4, 0, full_path+"\x00"]
@@ -3642,7 +3648,8 @@ class RemoteShare(Ports, Translate):
                 self.log(
                     "comment",
                     "%i bytes of data sent in message." % len(file_data),
-                    ""
+                    "",
+                    level = LOG_API
                     )
                 
                 # Wait for messages to arrive with the same ID as
@@ -3763,12 +3770,12 @@ class RemoteShare(Ports, Translate):
         # Convert the filename into a RISC OS filename on the share.
         directory, file = os.path.split(path)
         
-        self.log("comment", "File to put: %s" % file, "")
+        self.log("comment", "File to put: %s" % file, "", level = LOG_API)
         
         _, _, ros_file = \
             self.suffix_to_filetype(file)
         
-        self.log("comment", "Remote file: %s" % ros_file, "")
+        self.log("comment", "Remote file: %s" % ros_file, "", level = LOG_API)
         
         # Determine whether the share path supplied refers to a file
         # or a directory.
@@ -3813,7 +3820,7 @@ class RemoteShare(Ports, Translate):
             
             full_path = self.name + "." + ros_path
         
-        self.log("comment", "Remote path: %s" % ros_path, "")
+        self.log("comment", "Remote path: %s" % ros_path, "", level = LOG_API)
         
         # Create a file on the remote server using the full share path.
         msg = ["A", 0x4, 0, full_path+"\x00"]
@@ -3906,7 +3913,8 @@ class RemoteShare(Ports, Translate):
                     self.log(
                         "comment",
                         "%i bytes of data sent in message." % len(file_data),
-                        ""
+                        "",
+                        level = LOG_API
                         )
                     
                     # Send the reply as a string.
@@ -4842,7 +4850,8 @@ class Peer(Ports):
         self.log(
             "comment",
             "Receiving file: start = %i, amount = %i" % (start, amount),
-            "", level = 1
+            "",
+            level = LOG_API
             )
         
         pos = start
@@ -4984,9 +4993,9 @@ class Peer(Ports):
         
         end = start + length
         
-        self.log("comment", "Position: %i" % pos, "")
-        self.log("comment", "Expected amount of data: %i" % amount, "")
-        self.log("comment", "End at: %i" % end, "")
+        self.log("comment", "Position: %i" % pos, "", level = LOG_API)
+        self.log("comment", "Expected amount of data: %i" % amount, ", level = LOG_API")
+        self.log("comment", "End at: %i" % end, ", level = LOG_API")
         
         # Read the host name from the address tuple.
         host = address[0]
@@ -5012,7 +5021,8 @@ class Peer(Ports):
                     "comment",
                     "Sent %i bytes of data (from %x beyond %x) to %s" % (
                         len(file_data), pos - start, start, host
-                        ), ""
+                        ), "",
+                    level = LOG_API
                     )
                 
                 replied, data = self._send_request(
@@ -5139,7 +5149,7 @@ class Peer(Ports):
     
     def _read_poll_socket(self, data, address):
     
-        self.log("received", data, address)
+        self.log("received", data, address, level = LOG_PROTOCOL)
         
         host = address[0]
         
@@ -5556,7 +5566,7 @@ class Peer(Ports):
     
     def _read_listener_socket(self, data, address):
     
-        self.log("received", data, address)
+        self.log("received", data, address, level = LOG_PROTOCOL)
         
         request1 = self.str2num(4, data[0:4])
         request2 = self.str2num(4, data[4:8])
@@ -5586,7 +5596,7 @@ class Peer(Ports):
             
             if data:
             
-                self.log("comment", "Listening socket", "")
+                self.log("comment", "Listening socket", "", level = LOG_PROTOCOL)
                 self._read_share_socket(s, data, address)
         
         except socket.error:
@@ -5602,7 +5612,7 @@ class Peer(Ports):
             
             if data:
             
-                self.log("comment", "Broadcasting socket", "")
+                self.log("comment", "Broadcasting socket", "", level = LOG_PROTOCOL)
                 self._read_share_socket(s, data, address)
         
         except socket.error:
@@ -5625,7 +5635,7 @@ class Peer(Ports):
         #
         #print("")
         
-        self.log("received", data, address)
+        self.log("received", data, address, level = LOG_PROTOCOL)
         
         command = self.cmd2str(data[0])
         reply_id = self.replyid2str(data[1:4])
@@ -5654,7 +5664,8 @@ class Peer(Ports):
                 self.log(
                     "comment", 'Request to open "%s" in share "%s"' % (
                         ros_path, share_name
-                        ), ""
+                        ), "",
+                    level = LOG_API
                     )
                 
                 try:
@@ -5701,7 +5712,8 @@ class Peer(Ports):
                 self.log(
                     "comment", 'Request to open "%s" in share "%s"' % (
                         ros_path, share_name
-                        ), ""
+                        ), "",
+                    level = LOG_API
                     )
                 
                 try:
@@ -5743,7 +5755,8 @@ class Peer(Ports):
                 self.log(
                     "comment", 'Request to create "%s" in share "%s"' % (
                         ros_path, share_name
-                        ), ""
+                        ), "",
+                    level = LOG_API
                     )
                 
                 try:
@@ -5786,7 +5799,8 @@ class Peer(Ports):
                 self.log(
                     "comment", 'Request to create "%s" in share "%s"' % (
                         ros_path, share_name
-                        ), ""
+                        ), "",
+                    level = LOG_API
                     )
                 
                 try:
@@ -6073,9 +6087,9 @@ class Peer(Ports):
                         path = fh.path
                         length = fh.length()
                         
-                        self.log("comment", "", "")
-                        self.log("comment", path, "")
-                        self.log("comment", "Length of file: %i" % length, "")
+                        self.log("comment", "", "", level = LOG_API)
+                        self.log("comment", path, "", level = LOG_API)
+                        self.log("comment", "Length of file: %i" % length, "", level = LOG_API)
                         
                         # Extract the host name from the address as it is assumed that
                         # communication will be through port 49171.
@@ -6158,7 +6172,8 @@ class Peer(Ports):
                     
                     self.log(
                         "comment",
-                        "Change length from %i to %i" % (length, new_length), ""
+                        "Change length from %i to %i" % (length, new_length), "",
+                        level = LOG_API
                         )
                     
                     # If the length is to be changed then open the file for
@@ -6259,7 +6274,8 @@ class Peer(Ports):
                     
                     self.log(
                         "comment",
-                        "Change length from %i to %i" % (length, new_length), ""
+                        "Change length from %i to %i" % (length, new_length), "",
+                        level = LOG_API
                         )
                     
                     # If the length is to be changed then open the file for
@@ -6431,7 +6447,7 @@ class Peer(Ports):
                 # Reply with an error message.
                 msg = self._encode(["E"+reply_id, 0x100d6, "Not found"])
             
-            self.log("sent", msg, address)
+            self.log("sent", msg, address, level = LOG_PROTOCOL)
             
             # Send the message.
             _socket.sendto(msg, address)
@@ -6550,7 +6566,7 @@ class Peer(Ports):
         
         else:
         
-            #self.log("received", data, address)
+            #self.log("received", data, address, level = LOG_PROTOCOL)
             pass
     
     
