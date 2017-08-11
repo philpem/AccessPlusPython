@@ -6723,7 +6723,7 @@ class Peer(Ports):
         
         name = name.lower()
 
-        if self.shares.has_key((name, Hostaddr)):
+        if (name, Hostaddr) in self.shares:
         
             print("Share is already available: %s" % name)
             return
@@ -6799,7 +6799,7 @@ class Peer(Ports):
         Remove the named share from the shares available to other hosts.
         """
         
-        if not self.shares.has_key((name, Hostaddr)):
+        if not (name, Hostaddr) in self.shares:
         
             print("Share is not currently available: %s" % name)
             return
@@ -6868,7 +6868,7 @@ class Peer(Ports):
         # If there is not currently a share for accepting print jobs then
         # create one.
         
-        if not self.shares.has_key((PrintShareName, Hostaddr)):
+        if not (PrintShareName, Hostaddr) in self.shares:
         
             #share = PrinterShare(
             #    name, PrintShareName, directory, 0o666, delay,
