@@ -5896,6 +5896,8 @@ class Peer(Ports):
                 # Find the share and RISC OS path within it.
                 share_name, ros_path = self.read_share_path(self.bytearray2str(data[16:]))
                 
+                self.log("comment", "Setting access attributes %s for %s on %s" % (hex(access_attr), ros_path, share_name), "", level = LOG_API)
+
                 try:
                 
                     share = self.shares[(share_name, Hostaddr)]
