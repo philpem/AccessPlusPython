@@ -40,6 +40,11 @@ import ctypes
 if sys.version_info > (3,):
 
     long = int
+    longtype = long
+
+else:
+
+    longtype = types.LongType
 
 if not "extsep" in os.__dict__:
 
@@ -742,15 +747,15 @@ class Ports(Common):
         
         for item in l:
         
-            if type(item) == types.IntType:
+            if type(item) == int:
             
                 output.append(self.number(4, item))
             
-            elif type(item) == types.LongType:
+            elif type(item) == longtype:
             
                 output.append(self.number(4, item))
 
-            elif type(item) == types.TupleType:
+            elif type(item) == tuple:
 
                 if item[0] == NO_PAD:
 
@@ -968,14 +973,14 @@ class Ports(Common):
         if DEBUG == 0: return
         if LOG_LEVEL > level: return
         
-        if direction[0] == "s" and type(data) == types.ListType:
+        if direction[0] == "s" and type(data) == list:
         
             lines = ["Sent to %s:%i" % address] + \
                 self.interpret(self._encode(data))
                 
             Ports._log = Ports._log + lines
         
-        elif direction[0] == "s" and type(data) == types.StringType:
+        elif direction[0] == "s" and type(data) == str:
         
             lines = ["Sent to %s:%i" % address] + \
                 self.interpret(data)
