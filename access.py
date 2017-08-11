@@ -188,7 +188,8 @@ def setup_net(interface):
 
     p = subprocess.Popen(["/sbin/ifconfig", interface], stdout=subprocess.PIPE)
     stdout, _ = p.communicate()
-    stdout = stdout.replace("\n", "")
+    stdout = stdout.decode("utf-8").replace("\n", "")
+    print(stdout)
     # Find Hostaddr
     c = stdout.find("inet addr")
     if c != -1:
