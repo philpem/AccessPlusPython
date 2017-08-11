@@ -189,7 +189,6 @@ def setup_net(interface):
     p = subprocess.Popen(["/sbin/ifconfig", interface], stdout=subprocess.PIPE)
     stdout, _ = p.communicate()
     stdout = stdout.decode("utf-8").replace("\n", "")
-    print(stdout)
     # Find Hostaddr
     c = stdout.find("inet addr")
     if c != -1:
@@ -2084,7 +2083,7 @@ class Share(Ports, Translate):
         if self.get_key() == 0:
             return
 
-        if not self.broadcasters.has_key(32771):
+        if not 32771 in self.broadcasters:
         
             print("No socket to use for port %i" % 32771)
             return
@@ -2113,7 +2112,7 @@ class Share(Ports, Translate):
         if self.key != 0:
             return
 
-        if not self.broadcasters.has_key(32770):
+        if not 32770 in self.broadcasters:
         
             print("No socket to use for port %i" % 32770)
             return
@@ -2130,7 +2129,7 @@ class Share(Ports, Translate):
         
         # Advertise the share on the share socket.
         
-        if not self.broadcasters.has_key(49171):
+        if not 49171 in self.broadcasters:
         
             print("No socket to use for port %i" % 49171)
             return
@@ -4117,7 +4116,7 @@ class Printer(Ports):
         
         # Broadcast the availability of the printer on the polling socket.
         
-        if not self.broadcasters.has_key(32770):
+        if not 32770 in self.broadcasters:
         
             print("No socket to use for port %i" % 32770)
             return
@@ -4547,7 +4546,7 @@ class Peer(Ports):
         Broadcast startup/availability messages on port 32770.
         """
         
-        if not self.broadcasters.has_key(32770):
+        if not 32770 in self.broadcasters:
         
             print("No socket to use for port %i" % 32770)
             return
@@ -4581,7 +4580,7 @@ class Peer(Ports):
         Broadcast a poll on port 32770 every few seconds. Never exits.
         """
         
-        if not self.broadcasters.has_key(32770):
+        if not 32770 in self.broadcasters:
         
             print("No socket to use for port %i" % 32770)
             return
@@ -4658,7 +4657,7 @@ class Peer(Ports):
         
         # Broadcast the availability of the share on the polling socket.
         
-        if not self.broadcasters.has_key(32771):
+        if not 32771 in self.broadcasters:
         
             print("No socket to use for port %i" % 32771)
             return
@@ -4674,7 +4673,7 @@ class Peer(Ports):
         
         # Advertise the share on the share socket.
         
-        if not self.broadcasters.has_key(49171):
+        if not 49171 in self.broadcasters:
         
             print("No socket to use for port %i" % 49171)
             return
@@ -4726,7 +4725,7 @@ class Peer(Ports):
 
     def send_query(self, host):
     
-        if not self.broadcasters.has_key(32770):
+        if not 32770 in self.broadcasters:
         
             print("No socket to use for port %i" % 32770)
             return
