@@ -289,7 +289,7 @@ def print_share_name(hostaddr):
 
 # The print share name
 
-PrintShareName = None
+PrintShareName = print_share_name(Hostaddr)
 
 # The directory to be used for incoming print jobs is defined on a per
 # Peer basis.
@@ -7024,8 +7024,6 @@ if __name__ == "__main__":
     except getopt.GetoptError as err:
         print(err)
 
-    PrintShareName = print_share_name(Hostaddr)
-    
     p = Peer(access_plus = want_access_plus)
     
     DEBUG = 0
