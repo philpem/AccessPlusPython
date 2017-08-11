@@ -298,14 +298,60 @@ PrintShareName = None
 
 class Common:
 
+    def bytearray2str(self, b):
+        """Convert a byte array to a string."""
+
+        if type(b) == str:
+
+            return b
+
+        return b.decode("UTF-8")
+
+    def cmd2str(self, c):
+
+        if type(c) == int:
+
+            # Python 3
+            return chr(c)
+
+        else:
+
+            # Python 2
+            return c
+
+    def replyid2str(self, reply_id):
+
+        s = ""
+
+        for c in reply_id:
+
+            if type(c) == int:
+
+                # Python 3
+                s += chr(c)
+
+            else:
+
+                # Python 2
+                s += c
+
+        return s
+
     def str2num(self, size, s):
         """Convert a string of decimal digits to an positive integer."""
-        
+
         i = 0
         n = long(0)
         while i < size:
         
-            n = n | (long(ord(s[i])) << (i*8))
+            if type(s[i]) == int:
+
+                v = long(s[i])
+            else:
+
+                v = long(ord(s[i]))
+
+            n = n | (v << (i*8))
             i = i + 1
         
         return n
@@ -315,18 +361,33 @@ class Common:
         """Convert a number to a little endian string of bytes for writing to a binary file."""
         
         # Little endian writing
-        
+
+
         s = ""
+        ba = bytearray()
         
         while size > 0:
         
             i = n % 256
-            s = s + chr(i)
+
+            if sys.version_info > (3,):
+
+                ba.append(i)
+
+            else:
+
+                s = s + chr(i)
     
             n = n >> 8
             size = size - 1
         
-        return s
+        if sys.version_info > (3,):
+
+            return bytes(ba)
+
+        else:
+
+            return s
     
     def read_string(self, data, offset = 0, length = None, ending = None, include = 1):
 
@@ -404,7 +465,7 @@ class Common:
     def interpret(self, data):
     
         lines = []
-        
+
         i = 0
         
         while i < len(data):
@@ -431,13 +492,14 @@ class Common:
             
             if len(words) < 35: words = words + (35 - len(words)) * " "
             
-            # Show the data in string form.
             s = ""
-            
+            # Show the data in string form.
             for c in data[i:i+16]:
             
-                if ord(c) > 31 and ord(c) < 127:
+                if type(c) == str and ord(c) > 31 and ord(c) < 127:
                     s = s + c
+                elif type(c) == int and c > 31 and c < 127:
+                    s = s + chr(c)
                 else:
                     s = s + "."
             
@@ -775,11 +837,23 @@ class Ports(Common):
                 
                 if padding == 4: padding = 0
                 
-                padded = item + (padding * "\000")
+                if type(item) == str:
+
+                    padded = item + (padding * "\000")
+
+                    if sys.version_info > (3,):
+
+                        padded = bytes(padded, "latin-1")
+
+                else:
+
+                    padded = item + (padding * b"\000")
                 
                 output.append(padded)
         
-        return "".join(output)
+        s = b"".join(output)
+
+        return s
     
 #    def _decode(self, s, format):
 #    
@@ -888,7 +962,7 @@ class Ports(Common):
                 # See if the response has arrived.
                 replied, data = \
                     self.share_messages._scan_messages(host, new_id, commands)
-            
+
                 # If a message was found or an error occurred then return
                 # immediately.
                 if replied != 0:
@@ -936,7 +1010,7 @@ class Ports(Common):
         and wait for a reply.
         """
         # Use the non-broadcast socket.
-        if not self.ports.has_key(49171):
+        if not 49171 in self.ports:
         
             print("No socket to use for port %i" % 49171)
             return 0, []
@@ -1160,7 +1234,7 @@ class Messages(Common):
         (host, data) = hostdata
         # Take the first word of the message and store the message under
         # that entry in the dictionary if it exists.
-        key = data[1:4]
+        key = self.replyid2str(data[1:4])
         
         if key != "":
         
@@ -1183,7 +1257,7 @@ class Messages(Common):
         (host, data) = hostdata
         # Take the first word of the message and remove the message from
         # that entry in the dictionary if it exists.
-        key = data[1:4]
+        key = self.replyid2str(data[1:4])
         
         if key != "":
         
@@ -1252,7 +1326,7 @@ class Messages(Common):
         
             for command in commands:
             
-                if data[:4] == command + new_id:
+                if self.cmd2str(data[0]) == command and self.replyid2str(data[1:4]) == new_id:
                 
                     # Remove the claimed message from the list.
                     self.messages[(host, new_id)].remove(data)
@@ -3196,7 +3270,7 @@ class RemoteShare(Ports, Translate):
         
         for line in lines:
         
-            sys.stdout.write(string.expandtabs(line, 4)+"\n")
+            sys.stdout.write(line.expandtabs(4)+"\n")
         
         # The data following the directory structure is concerned
         # with the share and is like a return value from a share
@@ -3415,7 +3489,7 @@ class RemoteShare(Ports, Translate):
     def put(self, path, ros_path):
     
         # Use the non-broadcast socket.
-        if not self.ports.has_key(49171):
+        if not 49171 in self.ports:
         
             print("No socket to use for port %i" % 49171)
             return 0, []
@@ -3651,7 +3725,7 @@ class RemoteShare(Ports, Translate):
     def pput(self, path, ros_path):
     
         # Use the non-broadcast socket.
-        if not self.ports.has_key(49171):
+        if not 49171 in self.ports:
         
             print("No socket to use for port %i" % 49171)
             return 0, []
@@ -4573,7 +4647,7 @@ class Peer(Ports):
         [
             0x00050002, 0x00010000,
             (len(self.identity) << 16) | len(Hostname),
-            Hostname + self.identity
+            Hostname + str(self.identity)
         ]
         
         self._send_list(data, s, (Broadcast_addr, 32770))
@@ -4597,7 +4671,7 @@ class Peer(Ports):
         [
             0x00050004, 0x00010000,
             (len(self.identity) << 16) | len(Hostname),
-            Hostname + self.identity
+            Hostname + str(self.identity)
         ]
         
         b = self.broadcasters[49171]
@@ -5096,7 +5170,7 @@ class Peer(Ports):
                 if share_type == 0x00010000:
                 
                     # A string follows the leading three words.
-                    share_name = data[12:12+length1]
+                    share_name = self.bytearray2str(data[12:12+length1])
                     
                     c = 12 + length1
                     
@@ -5137,7 +5211,7 @@ class Peer(Ports):
                 # Share withdrawn
                 
                 # A string follows the leading three words.
-                share_name = data[12:12+length1]
+                share_name = self.bytearray2str(data[12:12+length1])
                 
                 c = 12 + length1
                 
@@ -5183,7 +5257,7 @@ class Peer(Ports):
 
 
                 # A string follows key or the leading 3 words
-                share_name = data[name_offset:name_offset+length1]
+                share_name = self.bytearray2str(data[name_offset:name_offset+length1])
  
                 valid_share = True
                 if key != 0 and valid_key == True:
@@ -5249,11 +5323,11 @@ class Peer(Ports):
                 # Printer made available
                 
                 # A string follows the leading three words.
-                printer_name = data[12:12+length1]
+                printer_name = self.bytearray2str(data[12:12+length1])
                 
                 c = 12 + length1
                 
-                printer_desc = data[c:c+length2]
+                printer_desc = self.bytearray2str(data[c:c+length2])
                 
                 c = c + length2
                 
@@ -5272,11 +5346,11 @@ class Peer(Ports):
                 # Printer withdrawn
                 
                 # A string follows the leading three words.
-                printer_name = data[12:12+length1]
+                printer_name = self.bytearray2str(data[12:12+length1])
                 
                 c = 12 + length1
                 
-                printer_desc = data[c:c+length2]
+                printer_desc = self.bytearray2str(data[c:c+length2])
                 
                 c = c + length2
                 
@@ -5296,11 +5370,11 @@ class Peer(Ports):
                 # Printer periodic broadcast
                 
                 # A string follows the leading three words.
-                printer_name = data[12:12+length1]
+                printer_name = self.bytearray2str(data[12:12+length1])
                 
                 c = 12 + length1
                 
-                printer_desc = data[c:c+length2]
+                printer_desc = self.bytearray2str(data[c:c+length2])
                 
                 c = c + length2
                 
@@ -5341,7 +5415,7 @@ class Peer(Ports):
                 # Startup broadcast
                 
                 # A string follows the leading three words.
-                client_name = data[12:12+length1]
+                client_name = self.bytearray2str(data[12:12+length1])
                 
                 c = 12 + length1
                 
@@ -5364,7 +5438,7 @@ class Peer(Ports):
                 # Query message (direct)
                 
                 # A string follows the leading three words.
-                client_name = data[12:12+length1]
+                client_name = self.bytearray2str(data[12:12+length1])
                 
                 c = 12 + length1
                 
@@ -5379,7 +5453,7 @@ class Peer(Ports):
                 # Availability broadcast
                 
                 # A string follows the leading three words.
-                client_name = data[12:12+length1]
+                client_name = self.bytearray2str(data[12:12+length1])
                 
                 c = 12 + length1
                 
@@ -5545,8 +5619,8 @@ class Peer(Ports):
         
         self.log("received", data, address)
         
-        command = data[0]
-        reply_id = data[1:4]
+        command = self.cmd2str(data[0])
+        reply_id = self.replyid2str(data[1:4])
         
         if len(data) > 4:
         
@@ -5567,7 +5641,7 @@ class Peer(Ports):
                 # Open a share, directory or path for read only
                 
                 # Find the share and RISC OS path within it.
-                share_name, ros_path = self.read_share_path(data[12:])
+                share_name, ros_path = self.read_share_path(self.bytearray2str(data[12:]))
                 
                 self.log(
                     "comment", 'Request to open "%s" in share "%s"' % (
@@ -6223,7 +6297,7 @@ class Peer(Ports):
         
             # Request for information.
             
-            share_name, ros_path = self.read_share_path(data[16:])
+            share_name, ros_path = self.read_share_path(self.bytearray2str(data[16:]))
             
             try:
             
@@ -6515,13 +6589,18 @@ class Peer(Ports):
                 t0 = time.time()
                 
                 items = self.transfers.items()
+                deadthreads = []
                 
                 for path, (thread, host) in items:
                 
                     if not thread.isAlive():
                     
-                        del self.transfers[path]
-                        del self.transfer_events[path]
+                        deadthreads.append(path)
+
+                for path in deadthreads:
+
+                    del self.transfers[path]
+                    del self.transfer_events[path]
             
             if event.isSet(): return
     
@@ -6670,9 +6749,7 @@ class Peer(Ports):
                 marker = [" ", "*"][host == Hostaddr]
                 
                 sys.stdout.write(
-                    string.expandtabs(
-                        "   %sName=%s\tHolder=%s\n" % (marker, name, host), 12
-                        )
+                    ("   %sName=%s\tHolder=%s\n" % (marker, name, host)).expandtabs(12)
                     )
             
             sys.stdout.write("\n")
@@ -6686,9 +6763,7 @@ class Peer(Ports):
                 marker = [" ", "*"][host == Hostaddr]
                 
                 sys.stdout.write(
-                    string.expandtabs(
-                        "   %sName=%s\tHolder=%s\n" % (marker, name, host), 12
-                        )
+                    ("   %sName=%s\tHolder=%s\n" % (marker, name, host)).expandtabs(12)
                     )
             
             sys.stdout.write("\n")
@@ -6702,9 +6777,7 @@ class Peer(Ports):
                 marker = [" ", "*"][host == Hostaddr]
                 
                 sys.stdout.write(
-                    string.expandtabs(
-                        "   %sName=%s\tHolder=%s\n" % (marker, name, host), 12
-                        )
+                    ("   %sName=%s\tHolder=%s\n" % (marker, name, host)).expandtabs(12)
                     )
             
             sys.stdout.write("\n")
