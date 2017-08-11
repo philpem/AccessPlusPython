@@ -152,22 +152,22 @@ Hostname = socket.gethostname()
 Hostaddr = socket.gethostbyname(Hostname)
 Netmask = "255.255.255.0"
 
-netoctets = string.split(Netmask, ".")
+netoctets = Netmask.split(".")
 netcount = 0
 for octet in netoctets:
     if octet == "255":
         netcount = netcount + 1
 
 # Define a string to represent the local subnet.
-Subnet = string.join(string.split(Hostaddr, ".")[:netcount], ".")
+Subnet = ".".join(Hostaddr.split(".")[:netcount])
 
 # Construct a broadcast address.
 all255 = ["255", "255", "255", "255"]
-Broadcast_addr = Subnet + "." + string.join(all255[:4-netcount], ".")
+Broadcast_addr = Subnet + "." + (".".join(all255[:4-netcount]))
 
 # Use just the hostname from the full hostname retrieved.
 
-at = string.find(Hostname, ".")
+at = Hostname.find(".")
 
 if at != -1:
 
@@ -190,30 +190,30 @@ def setup_net(interface):
     stdout, _ = p.communicate()
     stdout = stdout.replace("\n", "")
     # Find Hostaddr
-    c = string.find(stdout, "inet addr")
+    c = stdout.find("inet addr")
     if c != -1:
-        start = string.find(stdout, ":", c)
+        start = stdout.find(":", c)
         if start != -1:
-            end = string.find(stdout, ' ', start)
+            end = stdout.find(' ', start)
             Hostaddr = stdout[start+1:end]
 
     # Find broadcast address
-    c = string.find(stdout, "Bcast")
+    c = stdout.find("Bcast")
     if c != -1:
-        start = string.find(stdout, ":", c)
+        start = stdout.find(":", c)
         if start != -1:
-            end = string.find(stdout, " ", start)
+            end = stdout.find(" ", start)
             Broadcast_addr = stdout[start+1:end]
 
     # Find Subnet
-    c = string.find(stdout, "Mask")
+    c = stdout.find("Mask")
     if c != -1:
-        start = string.find(stdout, ":", c)
+        start = stdout.find(":", c)
         if start != -1:
-            end = string.find(stdout, " ", start)
+            end = stdout.find(" ", start)
             Netmask = stdout[start+1:end]
-            mask = string.split(Netmask, ".")
-            addr = string.split(Hostaddr, ".")
+            mask = Netmask.split(".")
+            addr = Hostaddr.split(".")
             Subnet = ""
             # FIXME: Deal with subnets that do not elements
             # other than 255 or 0
@@ -272,7 +272,7 @@ def print_share_name(hostaddr):
     
     while shift >= 0:
     
-        at = string.rfind(hostaddr, ".")
+        at = hostaddr.rfind(".")
         
         # Even if a "." is not found then the following expression still
         # works as the remaining string (hostaddr[0:]) will be read.
@@ -422,7 +422,7 @@ class Common:
                 
                 j = j + 4
             
-            words = string.join(words, " ")
+            words = " ".join(words)
             
             if len(words) < 35: words = words + (35 - len(words)) * " "
             
@@ -774,7 +774,7 @@ class Ports(Common):
                 
                 output.append(padded)
         
-        return string.join(output, "")
+        return "".join(output)
     
 #    def _decode(self, s, format):
 #    
@@ -805,7 +805,7 @@ class Ports(Common):
 #                
 #                output.append(padded)
 #        
-#        return string.join(output, "")
+#        return "".join(output)
     
     def _recvfrom(self, s, bufsize):
     
@@ -820,7 +820,7 @@ class Ports(Common):
         
         host = socket.gethostbyname(addr[0])
         
-        if string.find(host, Subnet) == 0:
+        if host.find(Subnet) == 0:
         
             return data, addr
         
@@ -1633,7 +1633,7 @@ class Translate:
             
                 new.append(c)
         
-        return string.join(new, "")
+        return "".join(new)
     
     def to_riscos_filename(self, name):
     
@@ -1646,7 +1646,7 @@ class Translate:
     def suffix_to_filetype(self, filename):
     
         # Check if the filetype is appended after a comma
-        at = string.rfind(filename, DEFAULT_FILETYPE_SEPARATOR)
+        at = filename.rfind(DEFAULT_FILETYPE_SEPARATOR)
         
         if at != -1:
             filetype = None
@@ -1655,7 +1655,7 @@ class Translate:
             # FIXME: Handle files with load and exec appended, in the form
             # ,XXXXXXXX-XXXXXXXX
             suffix = filename[at+len(DEFAULT_FILETYPE_SEPARATOR):]
-            hyphen = string.find(suffix, '-')
+            hyphen = suffix.find('-')
             if len(suffix) == 3:
                 filetype = string.atoi(suffix, 16)
             elif hyphen != -1:
@@ -1668,7 +1668,7 @@ class Translate:
             return filetype, loadexec, self.to_riscos_filename(filename[:at])
 
         # Find the appropriate filetype to use for the filename given.
-        at = string.rfind(filename, os.extsep)
+        at = filename.rfind(os.extsep)
 
         if at == -1:
         
@@ -2604,7 +2604,7 @@ class Share(Ports, Translate):
             # Check for a file suffix to determine the filetype of the file.
             # We will need to remember this when we rename the file in order
             # to maintain the correct type.
-            at = string.rfind(path, ".")
+            at = path.rfind(".")
             
             if at != -1:
             
@@ -2756,7 +2756,7 @@ class Share(Ports, Translate):
         
             # Omit files which begin with a suffix separator ("." on
             # Linux, for example).
-            if string.find(file, os.extsep) == 0:
+            if file.find(os.extsep) == 0:
             
                 continue
             
@@ -3287,7 +3287,7 @@ class RemoteShare(Ports, Translate):
         # Close the resource.
         self._close(handle)
         
-        return string.join(file_data, "")
+        return "".join(file_data)
     
     def pget(self, name):
     
@@ -3383,7 +3383,7 @@ class RemoteShare(Ports, Translate):
         # Close the resource.
         self._close(handle)
         
-        return string.join(file_data, "")
+        return "".join(file_data)
     
     def _close(self, handle):
     
@@ -4532,12 +4532,12 @@ class Peer(Ports):
             )
         
         # Split the path up into elements.
-        path_elements = string.split(path, ".")
+        path_elements = path.split(".")
         
         # The first element is the share name.
         share_name = path_elements[0]
         
-        return share_name.lower(), string.join(path_elements[1:], ".")
+        return share_name.lower(), ".".join(path_elements[1:])
     
     def broadcast_startup(self):
     
