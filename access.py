@@ -6743,7 +6743,7 @@ class Peer(Ports):
         try:
         
             # Mode value must be valid octal.
-            if type(mode) == types.StringType:
+            if type(mode) == str:
             
                 mode = self.coerce(
                     string.atoi, (mode, 8), (ValueError,), ShareError,
@@ -6759,7 +6759,7 @@ class Peer(Ports):
             
                 pass
             
-            elif type(delay) == types.StringType:
+            elif type(delay) == str:
             
                 delay = self.coerce(
                     float, (delay,), (ValueError,), ShareError,
@@ -6767,14 +6767,14 @@ class Peer(Ports):
                     )
             
             # Filetype value must be valid hexadecimal.
-            if type(filetype) == types.StringType:
+            if type(filetype) == str:
             
                 filetype = self.coerce(
                     string.atoi, (filetype, 16), (ValueError,), ShareError,
                     "Invalid hexadecimal value for filetype: %s" % filetype
                     )
 
-            if type(key) == types.StringType:
+            if type(key) == str:
 
                 key = self.coerce(
                     string.atoi, (key, 16), (ValueError,), ShareError,
@@ -6846,7 +6846,7 @@ class Peer(Ports):
             
                 pass
             
-            elif type(delay) == types.StringType:
+            elif type(delay) == str:
             
                 delay = self.coerce(
                     float, (delay,), (ValueError,), PrinterError,
