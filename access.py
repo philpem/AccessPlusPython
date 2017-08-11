@@ -5689,7 +5689,7 @@ class Peer(Ports):
                 # Open a share, directory or path for reading and writing
                 
                 # Find the share and RISC OS path within it.
-                share_name, ros_path = self.read_share_path(data[12:])
+                share_name, ros_path = self.read_share_path(self.bytearray2str(data[12:]))
                 
                 self.log(
                     "comment", 'Request to open "%s" in share "%s"' % (
