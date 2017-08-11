@@ -37,6 +37,10 @@ import getopt
 import errno
 import ctypes
 
+if sys.version_info > (3,):
+
+    long = int
+
 if not os.__dict__.has_key("extsep"):
 
     if sys.platform != "riscos":
@@ -60,7 +64,7 @@ TIDY_DELAY = 60.0
 NO_PAD = 1
 
 # Find the number of centiseconds between 1900 and 1970.
-between_epochs = ((365 * 70) + 17) * 24 * 360000L
+between_epochs = ((365 * 70) + 17) * 24 * long(360000)
 
 # Buffer size configuration
 
@@ -293,7 +297,7 @@ class Common:
         """Convert a string of decimal digits to an positive integer."""
         
         i = 0
-        n = 0L
+        n = long(0)
         while i < size:
         
             n = n | (long(ord(s[i])) << (i*8))
@@ -451,7 +455,7 @@ class Common:
         if (value & 0xffffffff) == 0xDEADDEAD:
             return time.localtime(0)
 
-        if seconds > 0x7fffffffL or seconds < -0x7fffffffL:
+        if seconds > long(0x7fffffff) or seconds < long(-0x7fffffff):
 
             # Value is out of range for 32 bit hosts.  Set date to
             # 1st Jan 1970
@@ -479,12 +483,12 @@ class Common:
     def _make_riscos_filetype_date(self, filetype, cs):
     
         filetype_word = long(
-            0xfff00000L | (filetype << 8) | \
-            (long(cs & 0xff00000000L) >> 32)
+            long(0xfff00000) | (filetype << 8) | \
+            (long(cs & long(0xff00000000)) >> 32)
             )
         
         # Date word
-        date_word = cs & 0xffffffffL
+        date_word = cs & long(0xffffffff)
         
         return filetype_word, date_word
     
@@ -2462,7 +2466,7 @@ class Share(Ports, Translate):
 
                 return None, path
 
-            return [ 0xdeaddeadL, 0xdeaddeadL, length, 0x33, object_type,
+            return [ long(0xdeaddead), long(0xdeaddead), length, 0x33, object_type,
                      handle ], path
         
         else:
@@ -2782,8 +2786,8 @@ class Share(Ports, Translate):
                     cs = self.to_riscos_time(seconds = seconds)
                 
                     filetype_word = long(
-                        0xfff00000L | (filetype << 8) | \
-                        ((cs & 0xff00000000L) >> 32)
+                        long(0xfff00000) | (filetype << 8) | \
+                        ((cs & long(0xff00000000)) >> 32)
                         )
                 
                     file_info.append(filetype_word)
@@ -2791,7 +2795,7 @@ class Share(Ports, Translate):
                     length = length + 4
                 
                     # Date word
-                    file_info.append(cs & 0xffffffffL)
+                    file_info.append(cs & long(0xffffffff))
                     length = length + 4
                 else:
 
@@ -2879,18 +2883,18 @@ class Share(Ports, Translate):
         # Use a hash value for the handle
         handle = jenkins_one_at_a_time_hash(path)
         
-        share_value = (handle & 0xffffff00L) ^ 0xffffff02L
+        share_value = (handle & long(0xffffff00)) ^ long(0xffffff02)
         
-        marker = 0xffffffffL
+        marker = long(0xffffffff)
         if len(infolist) > 1:
-            marker = 0x00000055L
+            marker = long(0x00000055)
 
         trailer = \
         [
 #           The first two words should be filetype and timestamp
-            0xffffcd00L, 0x00000000L,
+            long(0xffffcd00), long(0x00000000),
             round_up(dir_length, 2048),
-            0x00000013L, # Read only for others (0x10); read write for owner
+            long(0x00000013), # Read only for others (0x10); read write for owner
             share_value, # common value for directories in this share
             handle, # handle of object as with info returned for opening
             infolist[0][0], # number of words used to describe the directory
@@ -3107,7 +3111,7 @@ class RemoteShare(Ports, Translate):
         
             name = name + "." + ros_path
         
-        msg = ["B", 3, 0xffffffffL, 0, name+"\x00"]
+        msg = ["B", 3, long(0xffffffff), 0, name+"\x00"]
         
         # Send the request.
         replied, data = self._send_request(msg, self.host, ["S"])
@@ -5054,7 +5058,7 @@ class Peer(Ports):
         # information is about.
         about = self.str2num(4, data[:4]) 
         
-        major = (about & 0xffff0000L) >> 16
+        major = (about & long(0xffff0000)) >> 16
         minor = about & 0xffff
         
         # The second word of the response is the type of share.
@@ -6373,16 +6377,16 @@ class Peer(Ports):
                 infolen = info[0]
 
                 # I think the marker should alternate between
-                # 0x55000000L and 0xaa000000L.  It should be the opposite
+                # 0x55000000 and 0xaa000000.  It should be the opposite
                 # of the 'something' field
-                if something == 0xaa000000L:
-                    marker = 0x55000000L
-                elif something == 0x000000aaL:
-                    marker = 0x00000055L
-                elif something == 0x00000055L:
-                    marker = 0x000000aaL
+                if something == long(0xaa000000):
+                    marker = long(0x55000000)
+                elif something == long(0x000000aa):
+                    marker = long(0x00000055)
+                elif something == long(0x00000055):
+                    marker = long(0x000000aa)
                 else:
-                    marker = 0xaa000000L
+                    marker = long(0xaa000000)
 
                 if chunk_no == len(infolist) - 1:
                     # This is the last chunk.
@@ -6391,7 +6395,7 @@ class Peer(Ports):
                         del self.cache_send_info[(dir_handle, address)]
                     except KeyError:
                         pass
-                    marker = 0xffffffffL
+                    marker = long(0xffffffff)
                 else:
                     sent_chunk_info[0] = chunk_no
                     sent_chunk_info[1] = marker
