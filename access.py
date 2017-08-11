@@ -1747,21 +1747,24 @@ class Translate:
         at = filename.rfind(DEFAULT_FILETYPE_SEPARATOR)
         
         if at != -1:
-            filetype = None
+            filetype = DEFAULT_FILETYPE
             loadexec = None
             # comma separated suffix
-            # FIXME: Handle files with load and exec appended, in the form
-            # ,XXXXXXXX-XXXXXXXX
             suffix = filename[at+len(DEFAULT_FILETYPE_SEPARATOR):]
             hyphen = suffix.find('-')
-            if len(suffix) == 3:
-                filetype = int(suffix, 16)
-            elif hyphen != -1:
-                load_addr = int(suffix[:hyphen], 16)
-                exec_addr = int(suffix[hyphen+1:], 16)
-                loadexec = (load_addr, exec_addr)
-            else:
-                filetype = DEFAULT_FILETYPE
+            try:
+
+                if len(suffix) == 3:
+                    filetype = int(suffix, 16)
+                elif hyphen != -1:
+                    load_addr = int(suffix[:hyphen], 16)
+                    exec_addr = int(suffix[hyphen+1:], 16)
+                    loadexec = (load_addr, exec_addr)
+
+            except:
+
+                # Use default values
+                pass
 
             return filetype, loadexec, self.to_riscos_filename(filename[:at])
 
