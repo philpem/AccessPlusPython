@@ -36,6 +36,7 @@ import subprocess
 import getopt
 import errno
 import ctypes
+import functools
 
 if sys.version_info > (3,):
 
@@ -285,7 +286,7 @@ def print_share_name(hostaddr):
         shift = shift - 8
         hostaddr = hostaddr[:at]
     
-    return string.upper("_S%x" % value)
+    return ("_S%x" % value).upper()
 
 # The print share name
 
@@ -415,7 +416,7 @@ class Common:
             new = ''
             while offset < len(data):
     
-                c = data[offset]
+                c = str(data[offset])
                 if c in ending:
                 
                     if include == 1:
@@ -1467,13 +1468,13 @@ class Buffer:
         # Assume data fragments in the buffer do not overlap.
         self.pieces.sort()
         
-        data = reduce(lambda x, y: x + y[1], self.pieces, "")
+        data = functools.reduce(lambda x, y: x + y[1], self.pieces, "")
         
         return data
     
     def write(self, data):
     
-        self.pieces.append( (self.ptr, data) )
+        self.pieces.append( (self.ptr, str(data)) )
         self.ptr = self.ptr + len(data)
         self._length = max(self.ptr, self._length)
     
@@ -2460,7 +2461,7 @@ class Share(Ports, Translate):
 
                     path = path + DEFAULT_SUFFIX
 
-                open(path, "wb").write("")
+                open(path, "wb").write(b"")
                 os.chmod(path, self.mode | FILE_ATTR)
             
             except IOError:
@@ -2485,7 +2486,7 @@ class Share(Ports, Translate):
             try:
             
                 # Create an object on the local filesystem.
-                open(path, "wb").write("")
+                open(path, "wb").write(b"")
                 os.chmod(path, self.mode | FILE_ATTR)
             
             except IOError:
@@ -5730,7 +5731,7 @@ class Peer(Ports):
                 # Create and open a share, directory or path.
                 
                 # Find the share and RISC OS path within it.
-                share_name, ros_path = self.read_share_path(data[12:])
+                share_name, ros_path = self.read_share_path(self.bytearray2str(data[12:]))
                 
                 self.log(
                     "comment", 'Request to create "%s" in share "%s"' % (
@@ -5816,7 +5817,7 @@ class Peer(Ports):
                 # Delete request.
                 
                 # Find the share and RISC OS path within it.
-                share_name, ros_path = self.read_share_path(data[12:])
+                share_name, ros_path = self.read_share_path(self.bytearray2str(data[12:]))
                 
                 try:
                 
@@ -5845,7 +5846,7 @@ class Peer(Ports):
                 access_attr = self.str2num(4, data[8:12])
                 
                 # Find the share and RISC OS path within it.
-                share_name, ros_path = self.read_share_path(data[16:])
+                share_name, ros_path = self.read_share_path(self.bytearray2str(data[16:]))
                 
                 try:
                 
@@ -5888,7 +5889,7 @@ class Peer(Ports):
                 amount = self.str2num(4, data[8:12])
                 
                 # Find the share and RISC OS path within it.
-                share_name, ros_path = self.read_share_path(data[16:])
+                share_name, ros_path = self.read_share_path(self.bytearray2str(data[16:]))
                 
                 try:
                 
@@ -6903,7 +6904,7 @@ class Peer(Ports):
         Make the named printer available to other hosts.
         """
         
-        if self.printers.has_key((name, Hostaddr)):
+        if (name, Hostaddr) in self.printers:
         
             sys.stderr.write("Printer is already available: %s\n" % name)
             return
@@ -6960,7 +6961,7 @@ class Peer(Ports):
         Withdraw the named printer from service.
         """
         
-        if not self.printers.has_key((name, Hostaddr)):
+        if not (name, Hostaddr) in self.printers:
         
             print("Printer is not currently available: %s" % name)
             return
