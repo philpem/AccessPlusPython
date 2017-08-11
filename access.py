@@ -1150,8 +1150,9 @@ class Messages(Common):
     
         return self.messages.values()
     
-    def append(self, (host, data)):
+    def append(self, hostdata):
     
+        (host, data) = hostdata
         # Take the first word of the message and store the message under
         # that entry in the dictionary if it exists.
         key = data[1:4]
@@ -1172,8 +1173,9 @@ class Messages(Common):
             
                 self.lock.release()
     
-    def remove(self, (host, data)):
+    def remove(self, hostdata):
     
+        (host, data) = hostdata
         # Take the first word of the message and remove the message from
         # that entry in the dictionary if it exists.
         key = data[1:4]
