@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+
+from __future__ import print_function
+
 """
 access.py
 
@@ -216,7 +219,7 @@ def setup_net(interface):
                         Subnet = Subnet + "."
                     Subnet = Subnet + addr[i]
     if Hostaddr == None or Broadcast_addr == None or Subnet == None:
-        print "Failed to find Ethernet addresses for interface", interface
+        print("Failed to find Ethernet addresses for interface", interface)
         sys.exit(1)
 
 def jenkins_one_at_a_time_hash(path):
@@ -333,7 +336,7 @@ class Common:
 
         if length == None and ending == None:
     
-            print 'Internal: Incorrect use of the read_string function.'
+            print('Internal: Incorrect use of the read_string function.')
             return ""
     
         if length == None:
@@ -926,7 +929,7 @@ class Ports(Common):
         # Use the non-broadcast socket.
         if not self.ports.has_key(49171):
         
-            print "No socket to use for port %i" % 49171
+            print("No socket to use for port %i" % 49171)
             return 0, []
         
         s = self.ports[49171]
@@ -1252,7 +1255,7 @@ class Messages(Common):
                 
             if data[:4] == "E"+new_id:
             
-                #print 'Error: "%s"' % data[8:]
+                #print('Error: "%s"' % data[8:])
                 self.messages[(host, new_id)].remove(data)
                 
                 self.lock.release()
@@ -1457,7 +1460,7 @@ class Unused(Common):
     
         if not self.ports.has_key(port):
         
-            print "No socket to use for port %i" % port
+            print("No socket to use for port %i" % port)
             return []
         
         s = self.ports[port]
@@ -1495,10 +1498,10 @@ class Unused(Common):
                     
                         for line in lines:
                         
-                            print line
+                            print(line)
                             log.append(line)
                         
-                        print
+                        print("")
                         log.append("")
         
         except KeyboardInterrupt:
@@ -2076,7 +2079,7 @@ class Share(Ports, Translate):
 
         if not self.broadcasters.has_key(32771):
         
-            print "No socket to use for port %i" % 32771
+            print("No socket to use for port %i" % 32771)
             return
         
         # FIXME: should this be broadcasters or ports?
@@ -2105,7 +2108,7 @@ class Share(Ports, Translate):
 
         if not self.broadcasters.has_key(32770):
         
-            print "No socket to use for port %i" % 32770
+            print("No socket to use for port %i" % 32770)
             return
         
         s = self.broadcasters[32770]
@@ -2122,7 +2125,7 @@ class Share(Ports, Translate):
         
         if not self.broadcasters.has_key(49171):
         
-            print "No socket to use for port %i" % 49171
+            print("No socket to use for port %i" % 49171)
             return
         
         s = self.broadcasters[49171]
@@ -3086,7 +3089,7 @@ class RemoteShare(Ports, Translate):
         else:
         
             pass
-            #print 'Successfully opened "%s"' % name
+            #print('Successfully opened "%s"' % name)
         
         # Return the information on the item.
         return self._read_file_info(data)
@@ -3222,7 +3225,7 @@ class RemoteShare(Ports, Translate):
             
             if replied != 1:
             
-                print "The machine containing the shared disc does not respond"
+                print("The machine containing the shared disc does not respond")
                 return
             
             # Read the header.
@@ -3231,7 +3234,7 @@ class RemoteShare(Ports, Translate):
             
             file_data.append(data[12:12+length])
             
-            #print length, trailer_length, len(data)
+            #print(length, trailer_length, len(data))
             
             pos = pos + length
             
@@ -3314,7 +3317,7 @@ class RemoteShare(Ports, Translate):
             
             if replied != 1:
             
-                print "The machine containing the shared disc does not respond"
+                print("The machine containing the shared disc does not respond")
                 return
             
             from_addr = start_addr
@@ -3351,7 +3354,7 @@ class RemoteShare(Ports, Translate):
                 
                 if replied != 1:
                 
-                    print "The machine containing the shared disc does not respond"
+                    print("The machine containing the shared disc does not respond")
                     return
             
             sys.stdout.write(
@@ -3403,7 +3406,7 @@ class RemoteShare(Ports, Translate):
         # Use the non-broadcast socket.
         if not self.ports.has_key(49171):
         
-            print "No socket to use for port %i" % 49171
+            print("No socket to use for port %i" % 49171)
             return 0, []
         
         s = self.ports[49171]
@@ -3425,7 +3428,7 @@ class RemoteShare(Ports, Translate):
         
         except OSError:
         
-            print "Failed to find file: %s" % path
+            print("Failed to find file: %s" % path)
             return
         
         # Convert the filename into a RISC OS filename on the share.
@@ -3498,7 +3501,7 @@ class RemoteShare(Ports, Translate):
         
         if info is None or not info.has_key("handle"):
         
-            print "Cannot send file to client."
+            print("Cannot send file to client.")
             return
         
         # Send the file, from the start to  its length.
@@ -3566,7 +3569,7 @@ class RemoteShare(Ports, Translate):
                     
                     f.close()
                     
-                    print "Uploading was terminated."
+                    print("Uploading was terminated.")
                     return
                 
                 #pos = pos + amount
@@ -3612,7 +3615,7 @@ class RemoteShare(Ports, Translate):
             # delete method will prepend the share name.
             self.delete(ros_path)
             
-            print "Uploading was terminated."
+            print("Uploading was terminated.")
             return
         
         # Set the filetype and date stamp.
@@ -3639,7 +3642,7 @@ class RemoteShare(Ports, Translate):
         # Use the non-broadcast socket.
         if not self.ports.has_key(49171):
         
-            print "No socket to use for port %i" % 49171
+            print("No socket to use for port %i" % 49171)
             return 0, []
         
         s = self.ports[49171]
@@ -3661,7 +3664,7 @@ class RemoteShare(Ports, Translate):
         
         except OSError:
         
-            print "Failed to find file: %s" % path
+            print("Failed to find file: %s" % path)
             return
         
         # Convert the filename into a RISC OS filename on the share.
@@ -3735,7 +3738,7 @@ class RemoteShare(Ports, Translate):
         
         if info is None or not info.has_key("handle"):
         
-            print "Cannot send file to client."
+            print("Cannot send file to client.")
             return
         
         try:
@@ -3838,7 +3841,7 @@ class RemoteShare(Ports, Translate):
                         
                         f.close()
                         
-                        print "Uploading was terminated."
+                        print("Uploading was terminated.")
                         return
                 
                 #pos = pos + amount
@@ -3873,7 +3876,7 @@ class RemoteShare(Ports, Translate):
             # delete method will prepend the share name.
             self.delete(ros_path)
             
-            print "Uploading was terminated."
+            print("Uploading was terminated.")
             return
         
         # Set the filetype and date stamp.
@@ -4109,7 +4112,7 @@ class Printer(Ports):
         
         if not self.broadcasters.has_key(32770):
         
-            print "No socket to use for port %i" % 32770
+            print("No socket to use for port %i" % 32770)
             return
         
         s = self.broadcasters[32770]
@@ -4539,7 +4542,7 @@ class Peer(Ports):
         
         if not self.broadcasters.has_key(32770):
         
-            print "No socket to use for port %i" % 32770
+            print("No socket to use for port %i" % 32770)
             return
         
         s = self.broadcasters[32770]
@@ -4573,7 +4576,7 @@ class Peer(Ports):
         
         if not self.broadcasters.has_key(32770):
         
-            print "No socket to use for port %i" % 32770
+            print("No socket to use for port %i" % 32770)
             return
         
         s = self.broadcasters[32770]
@@ -4650,7 +4653,7 @@ class Peer(Ports):
         
         if not self.broadcasters.has_key(32771):
         
-            print "No socket to use for port %i" % 32771
+            print("No socket to use for port %i" % 32771)
             return
         
         s = self.broadcasters[32771]
@@ -4666,7 +4669,7 @@ class Peer(Ports):
         
         if not self.broadcasters.has_key(49171):
         
-            print "No socket to use for port %i" % 49171
+            print("No socket to use for port %i" % 49171)
             return
         
         s = self.broadcasters[49171]
@@ -4718,7 +4721,7 @@ class Peer(Ports):
     
         if not self.broadcasters.has_key(32770):
         
-            print "No socket to use for port %i" % 32770
+            print("No socket to use for port %i" % 32770)
             return
         
         s = self.broadcasters[32770]
@@ -5072,7 +5075,7 @@ class Peer(Ports):
             if minor == 0x0001:
             
                 # Startup
-                #print "Starting up shares"
+                #print("Starting up shares")
                 pass
             
             elif minor == 0x0002:
@@ -5091,8 +5094,8 @@ class Peer(Ports):
                     
                     if protected not in [0, 1]: protected = 0
                     
-                    #print 'Share "%s" (%s) available' % \
-                    #    (share_name, ["unprotected", "protected"][protected])
+                    #print('Share "%s" (%s) available' % \
+                    #    (share_name, ["unprotected", "protected"][protected]))
                     
                     # Compare the share with those recorded.
                     
@@ -5132,8 +5135,8 @@ class Peer(Ports):
                 
                 if protected not in [0, 1]: protected = 0
                 
-                #print 'Share "%s" (%s) withdrawn' % \
-                #    (share_name, ["unprotected", "protected"][protected])
+                #print('Share "%s" (%s) withdrawn' % \
+                #    (share_name, ["unprotected", "protected"][protected]))
                 
                 # Compare the share with those recorded.
                 
@@ -5189,8 +5192,8 @@ class Peer(Ports):
                 
                 if protected not in [0, 1]: protected = 0
                 
-                #print 'Share "%s" (%s)' % \
-                #    (share_name, ["unprotected", "protected"][protected])
+                #print('Share "%s" (%s)' % \
+                #    (share_name, ["unprotected", "protected"][protected]))
                 
                 # Compare the share with those recorded.
                 
@@ -5211,13 +5214,13 @@ class Peer(Ports):
             
             elif DEBUG == 1:
             
-                print "From: %s:%i" % address
+                print("From: %s:%i" % address)
                 
                 lines = self.interpret(data)
                 
                 for line in lines:
                 
-                    print line
+                    print(line)
         
         # Type 2 (Printers)
         
@@ -5243,8 +5246,8 @@ class Peer(Ports):
                 
                 c = c + length2
                 
-                #print 'Printer "%s" (%s) available' % \
-                #    (printer_name, printer_desc)
+                #print('Printer "%s" (%s) available' % \
+                #    (printer_name, printer_desc))
                 
                 # Compare the printer with those recorded.
                 
@@ -5266,8 +5269,8 @@ class Peer(Ports):
                 
                 c = c + length2
                 
-                #print 'Printer "%s" (%s) withdrawn' % \
-                #    (printer_name, printer_desc)
+                #print('Printer "%s" (%s) withdrawn' % \
+                #    (printer_name, printer_desc))
                 
                 # Compare the printer with those recorded.
                 
@@ -5290,8 +5293,8 @@ class Peer(Ports):
                 
                 c = c + length2
                 
-                #print 'Printer "%s" (%s)' % \
-                #    (printer_name, printer_desc)
+                #print('Printer "%s" (%s)' % \
+                #    (printer_name, printer_desc))
                 
                 # Compare the printer with those recorded.
                 
@@ -5302,13 +5305,13 @@ class Peer(Ports):
             
             elif DEBUG == 1:
             
-                print "From: %s:%i" % address
+                print("From: %s:%i" % address)
                 
                 lines = self.interpret(data)
                 
                 for line in lines:
                 
-                    print line
+                    print(line)
         
         # Type 5 (Hosts)
         
@@ -5319,7 +5322,7 @@ class Peer(Ports):
             if minor == 0x0001:
             
                 # Startup
-                #print "Starting up client"
+                #print("Starting up client")
                 pass
             
             elif minor == 0x0002:
@@ -5343,7 +5346,7 @@ class Peer(Ports):
                     self.cleanup_handles(host)
                     # FIXME: delete any shares owned by this host as well
 
-                #print "Startup client: %s %s" % (client_name, info)
+                #print("Startup client: %s %s" % (client_name, info))
             
             elif minor == 0x0003:
             
@@ -5358,7 +5361,7 @@ class Peer(Ports):
                 # information about the client.
                 info = data[c:c+length2]
                 
-                #print "Query: %s %08x" % (client_name, self.str2num(4, info))
+                #print("Query: %s %08x" % (client_name, self.str2num(4, info)))
             
             elif minor == 0x0004:
             
@@ -5379,7 +5382,7 @@ class Peer(Ports):
                 # work on my box
                 expire = time.time() + 600
                 
-                #print "Client available: %s %s" % (client_name, info)
+                #print("Client available: %s %s" % (client_name, info))
                 
                 # Compare the client with those in the clients dictionary.
                 
@@ -5395,13 +5398,13 @@ class Peer(Ports):
             
             elif DEBUG == 1:
             
-                print "From: %s:%i" % address
+                print("From: %s:%i" % address)
                 
                 lines = self.interpret(data)
                 
                 for line in lines:
                 
-                    print line
+                    print(line)
         
             # Clean up any handles left over from any clients
             # that have probably been switched off
@@ -5415,13 +5418,13 @@ class Peer(Ports):
 
         elif DEBUG == 1:
         
-            print "From: %s:%i" % address
+            print("From: %s:%i" % address)
             
             lines = self.interpret(data)
             
             for line in lines:
             
-                print line
+                print(line)
     
     def read_listener_socket(self):
     
@@ -5519,15 +5522,15 @@ class Peer(Ports):
     
         host = address[0]
         
-        #print "From: %s:%i" % address
+        #print("From: %s:%i" % address)
         #
         #lines = self.interpret(data)
         #
         #for line in lines:
         #
-        #    print line
+        #    print(line)
         #
-        #print
+        #print("")
         
         self.log("received", data, address)
         
@@ -5896,7 +5899,7 @@ class Peer(Ports):
                 pos = self.str2num(4, data[12:16])
                 length = self.str2num(4, data[16:20])
                 
-                #print "Data request", hex(handle), pos, length
+                #print("Data request", hex(handle), pos, length
                 
                 # Extract the host name from the address as it is assumed that
                 # communication will be through port 49171.
@@ -6245,12 +6248,12 @@ class Peer(Ports):
                     # Send the reply.
                     self._send_list(msg, _socket, address)
                     
-                    #print
-                    #print "Sent:"
+                    #print("")
+                    #print("Sent:")
                     #for line in self.interpret(self._encode(msg)):
                     #
-                    #    print line
-                    #print
+                    #    print(line)
+                    #print("")
                 
                 elif trailer == "Not a directory":
                 
@@ -6294,7 +6297,7 @@ class Peer(Ports):
             
             length = min(length, SEND_SIZE)
             
-            #print "Data request", hex(handle), pos, length
+            #print("Data request", hex(handle), pos, length)
             
             try:
             
@@ -6427,10 +6430,10 @@ class Peer(Ports):
             # Error response to a request.
             self.share_messages.append((host, data))
             
-            print "%s (%i)" % (
+            print("%s (%i)" % (
                 self.read_string(data[8:], ending = "\000", include = 0),
                 self.str2num(4, data[4:8])
-                )
+                ))
         
         elif command == "F":
         
@@ -6711,7 +6714,7 @@ class Peer(Ports):
 
         if self.shares.has_key((name, Hostaddr)):
         
-            print "Share is already available: %s" % name
+            print("Share is already available: %s" % name)
             return
         
         # Ensure that the values passed are reasonable and that the
@@ -6787,7 +6790,7 @@ class Peer(Ports):
         
         if not self.shares.has_key((name, Hostaddr)):
         
-            print "Share is not currently available: %s" % name
+            print("Share is not currently available: %s" % name)
             return
         
         # Set the relevant event object's flag.
@@ -6875,7 +6878,7 @@ class Peer(Ports):
         
         if not self.printers.has_key((name, Hostaddr)):
         
-            print "Printer is not currently available: %s" % name
+            print("Printer is not currently available: %s" % name)
             return
         
         # Set the relevant event object's flag.
@@ -6935,7 +6938,7 @@ if __name__ == "__main__":
             elif o == "--no-access-plus":
                 want_access_plus = 0
     except getopt.GetoptError, err:
-        print err
+        print(err)
 
     PrintShareName = print_share_name(Hostaddr)
     
