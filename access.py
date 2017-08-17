@@ -421,7 +421,7 @@ class Common:
             new = ''
             while offset < len(data):
     
-                if sys.version_info > (3,):
+                if type(data[offset]) == int:
 
                     c = chr(data[offset])
 
@@ -1754,7 +1754,7 @@ class Translate:
         at = filename.rfind(DEFAULT_FILETYPE_SEPARATOR)
         
         if at != -1:
-            filetype = DEFAULT_FILETYPE
+            filetype = self.filetype
             loadexec = None
             # comma separated suffix
             suffix = filename[at+len(DEFAULT_FILETYPE_SEPARATOR):]
@@ -1781,7 +1781,7 @@ class Translate:
         if at == -1:
         
             # No suffix: return the default filetype.
-            return DEFAULT_FILETYPE, None, self.to_riscos_filename(filename)
+            return self.filetype, None, self.to_riscos_filename(filename)
         
         # The suffix includes the "." character. Remove this platform's
         # separator and replace it with a ".".
@@ -1810,7 +1810,7 @@ class Translate:
                 
                     # The value found was not in a valid hexadecimal
                     # representation. Return the default filetype.
-                    return DEFAULT_FILETYPE, \
+                    return self.filetype, \
                         None, self.to_riscos_filename(filename)
         
         # Check whether the filename included a hexadecimal suffix.
@@ -1821,7 +1821,7 @@ class Translate:
         except ValueError:
         
             # No mappings declared the suffix used.
-            return DEFAULT_FILETYPE, None, self.to_riscos_filename(filename)
+            return self.filetype, None, self.to_riscos_filename(filename)
         
         # A hexadecimal suffix was used.
         if self.present == "truncate":
