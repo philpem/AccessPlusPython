@@ -421,7 +421,14 @@ class Common:
             new = ''
             while offset < len(data):
     
-                c = str(data[offset])
+                if sys.version_info > (3,):
+
+                    c = chr(data[offset])
+
+                else:
+
+                    c = str(data[offset])
+
                 if c in ending:
                 
                     if include == 1:
@@ -1005,7 +1012,7 @@ class Ports(Common):
             if self._id > 0xffffff:
                 self._id = 1
         
-        return "%s" % self.number(3, self._id)
+        return "%s" % (self.replyid2str(self.number(3, self._id)))
     
     def _send_request(self, msg, host, commands, new_id = None, tries = 5,
                       delay = 2):
@@ -3405,7 +3412,7 @@ class RemoteShare(Ports, Translate):
         # Close the resource.
         self._close(handle)
         
-        return "".join(file_data)
+        return b"".join(file_data)
     
     def pget(self, name):
     
@@ -3437,8 +3444,6 @@ class RemoteShare(Ports, Translate):
             # Send the request.
             replied, data = self._send_request(msg, self.host, ["D"])
             
-            reply_id = data[1:4]
-            
             if replied != 1:
             
                 print("The machine containing the shared disc does not respond")
@@ -3449,7 +3454,10 @@ class RemoteShare(Ports, Translate):
             while 1:
             
                 # Read the header.
-                if data[0] == "D" and len(data) > 8:
+                command = self.cmd2str(data[0])
+                reply_id = self.replyid2str(data[1:4])
+            
+                if command == "D" and len(data) > 8:
                 
                     from_addr = self.str2num(4, data[4:8]) + start_addr
 
@@ -3457,7 +3465,7 @@ class RemoteShare(Ports, Translate):
                     
                     from_addr = from_addr + len(data) - 8
 
-                elif data[0] == "D":
+                elif command == "D":
                 
                     data_pos = self.str2num(4, data[4:8]) + start_addr
 
@@ -3465,7 +3473,7 @@ class RemoteShare(Ports, Translate):
                     
                         break
                 
-                elif data[0] == "R" and from_addr == next_addr:
+                elif command == "R" and from_addr == next_addr:
                 
                     break
                 
@@ -3473,7 +3481,7 @@ class RemoteShare(Ports, Translate):
                 
                 # Send the request.
                 replied, data = self._send_request(
-                    msg, self.host, ["D", "R"], new_id = reply_id
+                    msg, self.host, ["D", "R"], new_id = self.replyid2str(reply_id)
                     )
                 
                 if replied != 1:
@@ -3501,7 +3509,7 @@ class RemoteShare(Ports, Translate):
         # Close the resource.
         self._close(handle)
         
-        return "".join(file_data)
+        return b"".join(file_data)
     
     def _close(self, handle):
     
@@ -3697,16 +3705,17 @@ class RemoteShare(Ports, Translate):
                     print("Uploading was terminated.")
                     return
                 
+                command = self.cmd2str(data[0])
                 #pos = pos + amount
-                if data[0] == "w":
+                if command == "w":
                 
                     # More data requested.
-                    reply_id = data[1:4]
+                    reply_id = self.replyid2str(data[1:4])
                     from_addr = self.str2num(4, data[4:8])
                     to_addr = self.str2num(4, data[12:16])
                     amount = min(SEND_SIZE, to_addr - from_addr)
                 
-                elif data[0] == "R":
+                elif command == "R":
                 
                     from_addr = self.str2num(4, data[4:8])
                     total_length = self.str2num(4, data[8:12])
@@ -3903,10 +3912,11 @@ class RemoteShare(Ports, Translate):
                 
                 while 1:
                 
-                    if data[0] == "w":
+                    command = self.cmd2str(data[0])
+                    if command == "w":
                     
                         # More data requested.
-                        reply_id = data[1:4]
+                        reply_id = self.replyid2str(data[1:4])
                         
                         # Convert the relative addresses into absolute ones.
                         from_addr = start_addr + self.str2num(4, data[4:8])
@@ -3916,7 +3926,7 @@ class RemoteShare(Ports, Translate):
                             
                         amount = min(SEND_SIZE, to_addr - from_addr)
                     
-                    elif data[0] == "R":
+                    elif command == "R":
                     
                         # Convert the relative addresses into absolute ones.
                         from_addr = start_addr + self.str2num(4, data[4:8])
