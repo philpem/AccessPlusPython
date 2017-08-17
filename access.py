@@ -4387,7 +4387,7 @@ class Peer(Ports):
         # Close all sockets.
         for port, _socket in self.broadcasters.items():
         
-            sys.stdout.write("Closing socket for port %i\n" % port)
+            sys.stdout.write("Closing broadcaster socket for port %i\n" % port)
             _socket.close()
         
         # On Windows, port sockets are a copy of broadcast sockets,
@@ -6694,8 +6694,13 @@ class Peer(Ports):
     
     def stop(self):
     
+        if not self.listen_event:
+
+            return
+
         # Terminate the listening thread.
         sys.stdout.write("Terminating the listening thread\n")
+
         self.listen_event.set()
         
         # Wait until the thread terminates.
@@ -6773,6 +6778,8 @@ class Peer(Ports):
         
             fh.close()
         
+        self.listen_event = None
+
         sys.stdout.write("Finished\n")
     
     def logon(self, username, key):
@@ -7116,6 +7123,10 @@ if __name__ == "__main__":
     
     # Shut down the peer cleanly.
     p.stop()
+
+    # Ensure p gets cleaned up before sys.exit(), otherwise nasty things
+    # happen in p.__del__()
+    del p
     
     # Exit
     sys.exit()
