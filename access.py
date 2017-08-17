@@ -2184,19 +2184,26 @@ class Share(Ports, Translate):
         if self.get_key() == 0:
             return
 
-        if not 32771 in self.broadcasters:
+        if not 32771 in self.ports:
         
             print("No socket to use for port %i" % 32771)
             return
         
-        # FIXME: should this be broadcasters or ports?
-        s = self.broadcasters[32771]
+        s = self.ports[32771]
         
+        shrtype = ""
+
+        # If the share is a username@host share, then append the share_type
+        # to the share name, otherwise leave the share_type off.
+        if '@' in self.name:
+
+            shrtype = chr(self.share_type)
+
         data = \
         [
             0x00010004, 0x00010001, 0x00010000 | len(self.name),
             self.get_key(),
-            self.name + chr(self.share_type)
+            self.name + shrtype
         ]
         
         self._send_list(data, s, dest)
@@ -5180,6 +5187,12 @@ class Peer(Ports):
         
         host = address[0]
         
+        if len(data) < 12:
+
+            # RISC os can be provoked to send these short messages.
+            # I can't work out what they are for.  Ignore them.
+            return
+
         # Check the first word of the response to determine what the
         # information is about.
         about = self.str2num(4, data[:4]) 
@@ -5310,7 +5323,9 @@ class Peer(Ports):
                     valid_share = False
                     for u in self.access_users.keys():
 
-                        if share_name.startswith(u + '@'):
+                        # u can be ether a share name, or it can be the
+                        # username as part of a username@host share.
+                        if share_name == u or share_name.startswith(u + '@'):
 
                             valid_share = True
                             break
@@ -5599,7 +5614,9 @@ class Peer(Ports):
         request2 = self.str2num(4, data[4:8])
         host = address[0]
 
-        if request1 == 0x10001 and request2 == 0x10001:
+        # RISCOS can send packets with no data. I think this is when
+        # a user logs into Access+ with the wrong password.
+        if request1 == 0x10001 and request2 == 0x10001 and len(data) > 11:
 
             key = self.str2num(4, data[8:])
 
@@ -6764,9 +6781,9 @@ class Peer(Ports):
         Logon to Access+
         """
 
-        if not self.access_users.has_key(username):
+        if not username in self.access_users:
 
-            self.access_users[username] = int(key, base=16)
+            self.access_users[username] = key
 
             self._request_secure_share(self.access_users[username])
 
