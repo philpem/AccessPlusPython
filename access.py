@@ -583,7 +583,7 @@ class Common:
         
         # Determine the relevant filetype to use.
         filetype, loadexec, _ = self.suffix_to_filetype(path)
-        
+
         if loadexec != None:
             return loadexec[0], loadexec[1]
 
@@ -1761,11 +1761,37 @@ class Translate:
     
         return self._filename(name, self.from_riscos)
     
-    def suffix_to_filetype(self, filename):
+    def suffix_to_filetype(self, filename, path = None):
     
         # Check if the filetype is appended after a comma
         at = filename.rfind(DEFAULT_FILETYPE_SEPARATOR)
+        filetype = None
         
+        if sys.platform.startswith('win32'):
+
+            try:
+
+                if path != None:
+
+                    localpath = path + os.sep + filename
+
+                with open(localpath + ":riscos", "r") as f:
+
+                    filetype = f.read()
+                    if at != -1:
+
+                        fname = filename[:at]
+
+                    else:
+
+                        fname = filename
+
+                    return int(filetype, 16), None, self.to_riscos_filename(fname)
+
+            except:
+
+                pass
+
         if at != -1:
             filetype = self.filetype
             loadexec = None
@@ -1888,6 +1914,10 @@ class Translate:
             return self.from_riscos_filename(filename) + \
                 os.extsep + suffixes[0][1:]
         
+        elif sys.platform.startswith('win32'):
+
+            return self.from_riscos_filename(filename)
+
         else:
         
             # No mappings declared the filetype used. Append a suffix
@@ -2807,23 +2837,38 @@ class Share(Ports, Translate):
             # Convert the file's path to a RISC OS style filetype and path.
             _, _, ros_path = self.suffix_to_filetype(fh.path)
             
-            # Determine the correct suffix to use for the file.
-            new_path = self.filetype_to_suffix(ros_path, filetype)
-            
-            self.log("comment", "Renaming %s to %s" % (fh.path, new_path), "", level = LOG_API)
-            
-            if fh.path != new_path:
-            
+            if sys.platform.startswith("win32"):
+
                 try:
-                
-                    # Try to rename the object.
-                    os.rename(fh.path, new_path)
-                
-                except OSError:
-                
+
+                    # Win32 stores filetypes in the :riscos alternate data stream
+                    with open(fh.path + ":riscos", "w") as f:
+
+                        f.write(hex(int(filetype)))
+
+                except:
+
                     return None
+
+            else:
+
+                # Determine the correct suffix to use for the file.
+                new_path = self.filetype_to_suffix(ros_path, filetype)
             
-            fh.path = new_path
+                self.log("comment", "Renaming %s to %s" % (fh.path, new_path), "", level = LOG_API)
+            
+                if fh.path != new_path:
+            
+                    try:
+                
+                        # Try to rename the object.
+                        os.rename(fh.path, new_path)
+                
+                    except OSError:
+                
+                        return None
+            
+                fh.path = new_path
         
         # Stamp with the correct access and modification date
         t = time.mktime(date)
@@ -2912,8 +2957,8 @@ class Share(Ports, Translate):
 
                 # Filetype word
                 filetype, loadexec, filename = \
-                    self.suffix_to_filetype(file)
-                
+                    self.suffix_to_filetype(file, path = path)
+
                 # Construct the filetype and date words.
                 
                 # The number of seconds since the last modification
