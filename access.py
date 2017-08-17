@@ -163,19 +163,6 @@ Hostname = socket.gethostname()
 Hostaddr = socket.gethostbyname(Hostname)
 Netmask = "255.255.255.0"
 
-netoctets = Netmask.split(".")
-netcount = 0
-for octet in netoctets:
-    if octet == "255":
-        netcount = netcount + 1
-
-# Define a string to represent the local subnet.
-Subnet = ".".join(Hostaddr.split(".")[:netcount])
-
-# Construct a broadcast address.
-all255 = ["255", "255", "255", "255"]
-Broadcast_addr = Subnet + "." + (".".join(all255[:4-netcount]))
-
 # Use just the hostname from the full hostname retrieved.
 
 at = Hostname.find(".")
@@ -187,6 +174,24 @@ if at != -1:
 # Keep track of usable handles
 available_handles = []
 max_available_handle = 3
+
+def get_subnet_from_address(addr, netmask):
+
+    netoctets = netmask.split(".")
+    netcount = 0
+    all255 = ["255", "255", "255", "255"]
+
+    for octet in netoctets:
+        if octet == "255":
+            netcount = netcount + 1
+
+    subnet = ".".join(addr.split(".")[:netcount])
+    bcast_addr = subnet + "." + (".".join(all255[:4-netcount]))
+
+    return (subnet, bcast_addr)
+
+# Define a string to represent the local subnet and broadcast address.
+(Subnet, Broadcast_addr) = get_subnet_from_address(Hostaddr, Netmask)
 
 def setup_net(interface):
     global Hostaddr
@@ -899,6 +904,14 @@ class Ports(Common):
 #        
 #        return "".join(output)
     
+    def _allowed_host(self, addr):
+
+        if addr in self.remote_nets:
+
+            return True
+
+        return False
+
     def _recvfrom(self, s, bufsize):
     
         """string, address = _recvfrom(self, socket, bufsize)
@@ -912,7 +925,7 @@ class Ports(Common):
         
         host = socket.gethostbyname(addr[0])
         
-        if host.find(Subnet) == 0:
+        if host.find(Subnet) == 0 or self._allowed_host(host):
         
             return data, addr
         
@@ -4382,6 +4395,9 @@ class Peer(Ports):
         # Maintain a dictionary of usernames we have logged on as
         # Each entry contains the password key
         self.access_users = {}
+
+        # List of hosts on different subnets that are permitted to talk to us
+        self.remote_nets = []
         
         # Start serving.
         self.serve()
@@ -4861,6 +4877,13 @@ class Peer(Ports):
         ]
 
         self._send_list(data, s, (Broadcast_addr, 32771))
+
+        s = self.ports[32771]
+
+        # log on to remote hosts
+        for addr in self.remote_nets:
+
+            self._send_list(data, s, (addr, 32771))
 
     def send_query(self, host):
     
@@ -6820,6 +6843,16 @@ class Peer(Ports):
 
                     del self.shares[(name, host)]
 
+    def fwaddnet(self, addr):
+
+        """fwaddnet(self)
+
+        Add a remote network address to the list of known hosts
+        """
+
+        # FIXME: This should also support subnets in the form a.b.c.d/prefix
+        self.remote_nets.append(addr)
+
     def fwshow(self):
     
         """fwshow(self)
@@ -6827,6 +6860,20 @@ class Peer(Ports):
         Show a list of known clients and their shared resources.
         """
         
+        if len(self.remote_nets) == 0:
+
+            sys.stdout.write("No remote nets\n")
+
+        else:
+
+            sys.stdout.write("Net addresses:\n")
+
+            for addr in self.remote_nets:
+
+                sys.stdout.write("%s\n" % (addr))
+
+        sys.stdout.write("\n")
+
         if self.clients != {}:
         
             sys.stdout.write("Type 5 (Hosts)\n")
