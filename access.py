@@ -4715,6 +4715,30 @@ class Peer(Ports):
                 sys.stderr.write(
                     "Bad or incomplete share description: %s\n" % line
                     )
+
+        f = None
+        
+        for path in paths:
+        
+            try:
+            
+                f = open(os.path.join(path, ".access.fwaddnet"), "r")
+                break
+            
+            except IOError:
+            
+                # Loop again.
+                pass
+        
+        if f:
+        
+            lines = f.readlines()
+            f.close()
+
+            for l in lines:
+
+                self.remote_nets.append(l.strip())
+        
     
     def read_share_path(self, _string):
     
