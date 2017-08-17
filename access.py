@@ -175,23 +175,75 @@ if at != -1:
 available_handles = []
 max_available_handle = 3
 
+def make_subnet(addr, netmask):
+
+    ip = struct.unpack("!I", socket.inet_aton(addr))[0]
+    nm = struct.unpack("!I", socket.inet_aton(netmask))[0]
+
+    subnet = ip & nm
+
+    return subnet
+
 def get_subnet_from_address(addr, netmask):
 
-    netoctets = netmask.split(".")
-    netcount = 0
-    all255 = ["255", "255", "255", "255"]
+    subnet = make_subnet(addr, netmask)
+    ip = struct.unpack("!I", socket.inet_aton(addr))[0]
+    nm = struct.unpack("!I", socket.inet_aton(netmask))[0]
 
-    for octet in netoctets:
-        if octet == "255":
-            netcount = netcount + 1
+    bmask = (~nm) & 0xffffffff
+    bcast = ip | bmask
 
-    subnet = ".".join(addr.split(".")[:netcount])
-    bcast_addr = subnet + "." + (".".join(all255[:4-netcount]))
+    bcast_addr = socket.inet_ntoa(struct.pack("!I", bcast))
 
     return (subnet, bcast_addr)
 
 # Define a string to represent the local subnet and broadcast address.
 (Subnet, Broadcast_addr) = get_subnet_from_address(Hostaddr, Netmask)
+
+def split_subnet_netmask(cidr):
+
+    pos = cidr.find("/")
+    elts = []
+
+    if pos != -1:
+
+        addr = cidr[:pos]
+        try:
+
+            prefixlen = int(cidr[pos+1:], 10)
+
+        except:
+
+            prefixlen = 0
+
+        # The netmask is a binary number with prefixlen 1s
+        # This code gets the netmask backwards, but that's OK.  It will
+        # be reversed in the following for loop
+        mask = (1 << prefixlen) - 1
+
+        for i in range(4):
+
+            elts.append(mask % 256)
+            mask = mask >> 8
+
+        netmask = "%d.%d.%d.%d" % (elts[0], elts[1], elts[2], elts[3])
+
+    else:
+
+        addr = cidr
+        netmask = "0.0.0.0"
+
+    return (addr, netmask)
+
+def host_on_same_subnet(addr, subnet):
+
+    ip = struct.unpack("!I", socket.inet_aton(addr))[0]
+
+    if ip & subnet == subnet:
+
+        return True
+
+    return False
 
 def setup_net(interface):
     global Hostaddr
@@ -202,42 +254,22 @@ def setup_net(interface):
     Broadcast_addr = None
     Subnet = None
 
-    p = subprocess.Popen(["/sbin/ifconfig", interface], stdout=subprocess.PIPE)
+    p = subprocess.Popen(["/sbin/ip", "addr", "show", interface], stdout=subprocess.PIPE)
     stdout, _ = p.communicate()
-    stdout = stdout.decode("utf-8").replace("\n", "")
+    stdout = stdout.decode("utf-8")
+
     # Find Hostaddr
-    c = stdout.find("inet addr")
-    if c != -1:
-        start = stdout.find(":", c)
-        if start != -1:
-            end = stdout.find(' ', start)
-            Hostaddr = stdout[start+1:end]
+    for line in stdout.splitlines():
 
-    # Find broadcast address
-    c = stdout.find("Bcast")
-    if c != -1:
-        start = stdout.find(":", c)
-        if start != -1:
-            end = stdout.find(" ", start)
-            Broadcast_addr = stdout[start+1:end]
+        if "inet " in line:
 
-    # Find Subnet
-    c = stdout.find("Mask")
-    if c != -1:
-        start = stdout.find(":", c)
-        if start != -1:
-            end = stdout.find(" ", start)
-            Netmask = stdout[start+1:end]
-            mask = Netmask.split(".")
-            addr = Hostaddr.split(".")
-            Subnet = ""
-            # FIXME: Deal with subnets that do not elements
-            # other than 255 or 0
-            for i in range(len(mask)):
-                if (mask[i] == "255"):
-                    if (i != 0):
-                        Subnet = Subnet + "."
-                    Subnet = Subnet + addr[i]
+            elts = line.strip().split(" ")
+            (Hostaddr, netmask) = split_subnet_netmask(elts[1])
+            Subnet = make_subnet(Hostaddr, netmask)
+            Broadcast_addr = elts[3]
+
+            break
+
     if Hostaddr == None or Broadcast_addr == None or Subnet == None:
         print("Failed to find Ethernet addresses for interface", interface)
         sys.exit(1)
@@ -925,7 +957,7 @@ class Ports(Common):
         
         host = socket.gethostbyname(addr[0])
         
-        if host.find(Subnet) == 0 or self._allowed_host(host):
+        if host_on_same_subnet(host, Subnet) or self._allowed_host(host):
         
             return data, addr
         
