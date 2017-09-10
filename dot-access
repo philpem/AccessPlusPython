@@ -5,6 +5,14 @@
 #user      /home/usr/share     0644    30.0     truncate     0xfff
 #scratch   /home/usr/tmp/share 0666    30.0     truncate     0xfff
 
+# A logon share.  The username is "me", password is "passwd"
+# The hostname will be added after the '@'
+#me@       /tmp    0644    30.0     suffix     0xfff    0x6cc855ee
+
+# A logon share.  The username is "user", password is passwd.  The password
+# has a maximum of 6 chars.  The hostname will be "host"
+#user@host /tmp    0644    30.0     suffix     0xfff    passwd
+
 #Access+ directories. Create /srv/accessplus/Apps and /srv/accessplus/Boot
 #to use.
 #<Access+> /srv/accessplus
@@ -14,4 +22,3 @@
 # PrintDefs: directory
 # "command" is currently unused.
 #<Printer> myprint /srv/printer /srv/printer/PoScript.prdef 30.0 0xfff MyPrinter NotUsedYet
-
