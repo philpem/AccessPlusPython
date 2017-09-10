@@ -4502,6 +4502,32 @@ class Peer(Ports):
                 sys.stdout.write("Closing socket for port %i\n" % port)
                 _socket.close()
     
+    def _encode_pin_char(self, c):
+
+        if (c.isdigit()):
+
+            return (ord(c) - ord('0')) + 1
+
+        elif c.isalpha():
+
+            return (ord(c.upper()) - ord('A')) + 11
+
+        return 0
+
+    def _make_pin(self, str):
+
+        if len(str) > 6:
+
+            return None
+
+        pin = ctypes.c_uint(0)
+
+        for c in str:
+
+            pin.value = (pin.value * 0x25) + self._encode_pin_char(c)
+
+        return int(pin.value)
+
     def cleanup_handles(self, host):
 
         for share in self.shares.values():
@@ -5838,7 +5864,6 @@ class Peer(Ports):
                 
                 # Find the share and RISC OS path within it.
                 share_name, ros_path = self.read_share_path(self.bytearray2str(data[12:]))
-                
                 self.log(
                     "comment", 'Request to open "%s" for reading in share "%s"' % (
                         ros_path, share_name
@@ -6924,9 +6949,19 @@ class Peer(Ports):
 
         if not username in self.access_users:
 
-            self.access_users[username] = key
+            pin = self._make_pin(key)
+
+            if not pin:
+
+                print("Invalid password.  It should be 6 chars maximum")
+
+                return False
+
+            self.access_users[username] = pin
 
             self._request_secure_share(self.access_users[username])
+
+            return True
 
 
     def logoff(self, username):
@@ -7029,6 +7064,10 @@ class Peer(Ports):
         to other hosts.
         """
         
+        if name[-1] == '@':
+
+            name = name + Hostname
+
         name = name.lower()
 
         if (name, Hostaddr) in self.shares:
@@ -7084,10 +7123,22 @@ class Peer(Ports):
 
             if type(key) == str:
 
-                key = self.coerce(
-                    int, (key, 16), (ValueError,), ShareError,
-                    "Invalid hexadecimal value for key: %s" % filetype
-                    )
+                if key.find("0x") == 0 and len(key) > 6:
+
+                    # Password is specified as the hex PIN value
+                    key = self.coerce(
+                        int, (key, 16), (ValueError,), ShareError,
+                        "Invalid hexadecimal value for key: %s" % filetype
+                        )
+
+                else:
+
+                    passwd = key
+                    key = self._make_pin(passwd)
+
+                    if not key:
+
+                        raise ShareError("Invalid password: %s" % passwd)
             
             share = Share(
                 name, directory, mode, delay, present, filetype, key,
