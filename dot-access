@@ -10,7 +10,7 @@
 #me@       /tmp    0644    30.0     suffix     0xfff    0x6cc855ee
 
 # A logon share.  The username is "user", password is passwd.  The password
-# has a maximum of 6 chars.  The hostname will be "host"
+# has a maximum of 6 alpha-numeric chars.  The hostname will be "host"
 #user@host /tmp    0644    30.0     suffix     0xfff    passwd
 
 #Access+ directories. Create /srv/accessplus/Apps and /srv/accessplus/Boot
