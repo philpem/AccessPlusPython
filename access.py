@@ -1672,6 +1672,9 @@ class ShareError(Exception):
 
     pass
 
+class PasswordError(Exception):
+
+    pass
 
 class Translate:
 
@@ -4510,7 +4513,17 @@ class Peer(Ports):
 
         elif c.isalpha():
 
-            return (ord(c.upper()) - ord('A')) + 11
+            v = ord(c.upper()) - ord('A')
+
+            if v > 25:
+
+                raise PasswordError("Password char is invalid: %s" % c)
+
+            return v + 11
+
+        else:
+
+            raise PasswordError("Password char is invalid: %s" % c)
 
         return 0
 
@@ -6949,11 +6962,19 @@ class Peer(Ports):
 
         if not username in self.access_users:
 
-            pin = self._make_pin(key)
+            pin = None
+
+            try:
+
+                pin = self._make_pin(key)
+
+            except:
+
+                pass
 
             if not pin:
 
-                print("Invalid password.  It should be 6 chars maximum")
+                print("Invalid password.  It should be a maximum of 6 alpha-numeric chars")
 
                 return False
 
@@ -7134,7 +7155,15 @@ class Peer(Ports):
                 else:
 
                     passwd = key
-                    key = self._make_pin(passwd)
+
+                    try:
+
+                        key = self._make_pin(passwd)
+
+                    except:
+
+                        key = None
+                        pass
 
                     if not key:
 
@@ -7149,7 +7178,8 @@ class Peer(Ports):
         
         except ShareError:
         
-            sys.stderr.write("Share could not be created: %s\n" % name)
+            sys.stderr.write("Share could not be created: %s, " % name)
+            sys.stderr.write("error: %s\n" % sys.exc_info()[1])
     
     def remove_share(self, name):
     
